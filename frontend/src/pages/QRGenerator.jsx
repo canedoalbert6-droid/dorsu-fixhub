@@ -1,12 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Download, QrCode, MapPin } from 'lucide-react';
+import { Download, QrCode, MapPin, Globe, AlertTriangle, ExternalLink } from 'lucide-react';
 
 const QRGenerator = () => {
   const [locId, setLocId] = useState('BLDG-A-101');
+  const [baseUrl, setBaseUrl] = useState(`http://${window.location.hostname}:5173`);
+  const [isLocalhost, setIsLocalhost] = useState(false);
 
-  // This URL should be your actual production domain eventually
-  const reportUrl = `${window.location.origin}/?loc=${locId}`;
+  useEffect(() => {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      setIsLocalhost(true);
+    } else {
+      setIsLocalhost(false);
+    }
+  }, []);
+
+  const reportUrl = `${baseUrl}/?loc=${locId}`;
 
   const downloadQR = () => {
     const svg = document.getElementById('qr-code-svg');
@@ -20,7 +29,7 @@ const QRGenerator = () => {
       ctx.drawImage(img, 0, 0);
       const pngFile = canvas.toDataURL('image/png');
       const downloadLink = document.createElement('a');
-      downloadLink.download = `QR-${locId}.png`;
+      downloadLink.download = `DOrSU-QR-${locId}.png`;
       downloadLink.href = pngFile;
       downloadLink.click();
     };
@@ -28,30 +37,56 @@ const QRGenerator = () => {
   };
 
   return (
-    <div className="card" style={{ maxWidth: '600px', margin: '0 auto' }}>
+    <div className="card" style={{ maxWidth: '700px', margin: '0 auto' }}>
       <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-        <div style={{ background: 'rgba(15, 118, 110, 0.1)', width: '60px', height: '60px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem', color: 'var(--primary)' }}>
-          <QrCode size={30} style={{ margin: 'auto' }} />
+        <div className="icon-box-md" style={{ margin: '0 auto 1rem', background: 'var(--bg)', color: 'var(--primary)' }}>
+          <QrCode size={30} />
         </div>
-        <h2 style={{ marginBottom: '0.5rem' }}>QR Code Generator</h2>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Generate location-specific codes for your campus.</p>
-      </div>
-      
-      <div className="form-group">
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <MapPin size={16} /> Location ID (e.g., RM-202)
-        </label>
-        <input 
-          type="text" 
-          className="form-control"
-          placeholder="Enter Room or Building Code"
-          value={locId}
-          onChange={(e) => setLocId(e.target.value)}
-        />
+        <h2 style={{ fontWeight: '800' }}>Smart QR Generator</h2>
+        <p style={{ color: 'var(--text-muted)' }}>Create scannable anchors for campus locations.</p>
       </div>
 
-      <div style={{ textAlign: 'center', background: 'var(--bg)', padding: '30px', borderRadius: 'var(--radius-lg)', border: '2px dashed var(--border)', marginBottom: '2rem' }}>
-        <div style={{ background: '#fff', padding: '15px', borderRadius: '12px', display: 'inline-block', boxShadow: 'var(--shadow-md)' }}>
+      {isLocalhost && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fef3c7', padding: '15px', borderRadius: '12px', marginBottom: '2rem', display: 'flex', gap: '12px' }}>
+          <AlertTriangle color="#d97706" size={24} style={{ flexShrink: 0 }} />
+          <div>
+            <strong style={{ color: '#92400e', display: 'block' }}>Localhost Detected!</strong>
+            <p style={{ margin: '5px 0 0', fontSize: '0.85rem', color: '#b45309' }}>
+              QR codes with "localhost" won't work on mobile phones. 
+              Please replace <strong>localhost</strong> in the box below with your <strong>Network IP</strong> (e.g., 192.168.xx.xx).
+            </p>
+          </div>
+        </div>
+      )}
+      
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '2rem' }}>
+        <div className="form-group">
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <MapPin size={16} /> Room/Location ID
+          </label>
+          <input 
+            type="text" 
+            className="form-control"
+            value={locId}
+            onChange={(e) => setLocId(e.target.value)}
+          />
+        </div>
+
+        <div className="form-group">
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Globe size={16} /> Server Address (IP)
+          </label>
+          <input 
+            type="text" 
+            className="form-control"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: '30px', alignItems: 'center', background: 'var(--bg)', padding: '30px', borderRadius: '20px', border: '1px solid var(--border)' }}>
+        <div style={{ background: '#fff', padding: '15px', borderRadius: '16px', boxShadow: 'var(--shadow-md)' }}>
           <QRCodeSVG 
             id="qr-code-svg"
             value={reportUrl} 
@@ -60,17 +95,20 @@ const QRGenerator = () => {
             includeMargin={true}
           />
         </div>
-        <p style={{ marginTop: '1rem', fontWeight: '700', color: 'var(--text-main)', fontSize: '1.1rem' }}>{locId}</p>
-        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '5px' }}>Scan to report issues at this location</p>
-      </div>
-
-      <div style={{ textAlign: 'center' }}>
-        <button onClick={downloadQR} className="btn-primary" style={{ width: 'auto', minWidth: '200px', margin: '0 auto' }}>
-          <Download size={18} /> Download PNG Image
-        </button>
-        <p style={{ marginTop: '1rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-          URL: <code>{reportUrl}</code>
-        </p>
+        
+        <div style={{ flex: 1 }}>
+          <h4 style={{ margin: '0 0 10px', color: 'var(--primary)' }}>Live Preview</h4>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '15px' }}>
+            Location: <strong>{locId}</strong><br/>
+            Target: <code style={{ color: 'var(--primary)', fontWeight: '700' }}>{reportUrl}</code>
+          </p>
+          <a href={reportUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: 'var(--primary)', fontWeight: '700', textDecoration: 'none', marginBottom: '20px' }}>
+            Test link on this computer <ExternalLink size={14} />
+          </a>
+          <button onClick={downloadQR} className="btn-primary" style={{ width: '100%' }}>
+            <Download size={18} /> Download for Print
+          </button>
+        </div>
       </div>
     </div>
   );

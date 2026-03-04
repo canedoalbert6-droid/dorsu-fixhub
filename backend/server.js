@@ -4,14 +4,29 @@ const multer = require('multer');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const mysql = require('mysql2/promise');
+const fs = require('fs');
+const http = require('http');
+const { Server } = require('socket.io');
 require('dotenv').config();
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
+
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+if (!fs.existsSync('./uploads')) {
+  fs.mkdirSync('./uploads');
+}
 
 // --- MySQL Connection ---
 let db;
@@ -33,16 +48,26 @@ async function connectDB() {
 }
 connectDB();
 
-// --- Multer Configuration ---
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, 'uploads/'),
   filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname),
 });
 const upload = multer({ storage });
 
+const getAutoPriority = (issue, type) => {
+  if (type === 'Innovation') return 'Low';
+  const highPriority = ['Electrical Problem', 'Plumbing Leak', 'Structural Damage'];
+  return highPriority.includes(issue) ? 'High' : 'Medium';
+};
+
+// --- Socket.io Logic ---
+io.on('connection', (socket) => {
+  console.log('Admin connected:', socket.id);
+  socket.on('disconnect', () => console.log('Admin disconnected'));
+});
+
 // --- API ENDPOINTS ---
 
-// 0. Admin Login
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   try {
@@ -57,24 +82,27 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// 1. Submit a Report (User)
 app.post('/api/reports', upload.single('image'), async (req, res) => {
-  const { locationId, issue, description } = req.body;
+  const { locationId, issue, description, reportType } = req.body;
   const id = uuidv4();
   const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
+  const priority = getAutoPriority(issue, reportType);
   
   try {
     await db.query(
-      'INSERT INTO reports (id, location_id, issue, description, image_url) VALUES (?, ?, ?, ?, ?)',
-      [id, locationId, issue, description, imageUrl]
+      'INSERT INTO reports (id, location_id, report_type, issue, description, image_url, priority) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [id, locationId, reportType || 'Maintenance', issue, description, imageUrl, priority]
     );
+    
+    // NEW: Notify all connected admins via Socket.io
+    io.emit('newReport', { id, locationId, issue, reportType, priority });
+    
     res.status(201).json({ message: 'Report submitted successfully!' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 2. Fetch All Reports (Admin)
 app.get('/api/reports', async (req, res) => {
   try {
     const [rows] = await db.query('SELECT * FROM reports ORDER BY created_at DESC');
@@ -84,19 +112,33 @@ app.get('/api/reports', async (req, res) => {
   }
 });
 
-// 3. Update Report Status (Admin)
 app.patch('/api/reports/:id', async (req, res) => {
   const { id } = req.params;
-  const { status } = req.body;
+  const { status, adminNotes } = req.body;
   try {
-    await db.query('UPDATE reports SET status = ? WHERE id = ?', [status, id]);
-    res.json({ message: 'Status updated successfully!' });
+    const query = status 
+      ? 'UPDATE reports SET status = ?, admin_notes = ? WHERE id = ?'
+      : 'UPDATE reports SET admin_notes = ? WHERE id = ?';
+    const params = status ? [status, adminNotes, id] : [adminNotes, id];
+    
+    await db.query(query, params);
+    res.json({ message: 'Report updated successfully!' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 4. Fetch Locations
+// 3.5 Delete a Report (Admin Only)
+app.delete('/api/reports/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await db.query('DELETE FROM reports WHERE id = ?', [id]);
+    res.json({ message: 'Report deleted successfully!' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/locations/:id', async (req, res) => {
   try {
     const [rows] = await db.query('SELECT * FROM locations WHERE location_id = ?', [req.params.id]);
@@ -107,7 +149,22 @@ app.get('/api/locations/:id', async (req, res) => {
   }
 });
 
-// 5. Fetch Reports for Specific Location (User Tracker)
+app.get('/api/buildings/health', async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        location_id, 
+        COUNT(*) as total,
+        SUM(CASE WHEN status != 'Resolved' THEN 1 ELSE 0 END) as pending_count
+      FROM reports 
+      GROUP BY location_id
+    `);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/reports/location/:locationId', async (req, res) => {
   try {
     const [rows] = await db.query(
@@ -120,6 +177,7 @@ app.get('/api/reports/location/:locationId', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Professional API running at http://localhost:${PORT}`);
+// IMPORTANT: use server.listen instead of app.listen for Socket.io
+server.listen(PORT, () => {
+  console.log(`Real-time API running at http://localhost:${PORT}`);
 });

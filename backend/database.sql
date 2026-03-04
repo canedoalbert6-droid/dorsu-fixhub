@@ -14,11 +14,15 @@ CREATE TABLE IF NOT EXISTS locations (
 CREATE TABLE IF NOT EXISTS reports (
     id CHAR(36) PRIMARY KEY,
     location_id VARCHAR(50) NOT NULL,
+    report_type ENUM('Maintenance', 'Innovation') DEFAULT 'Maintenance',
     issue VARCHAR(100) NOT NULL,
     description TEXT NOT NULL,
     image_url VARCHAR(255),
+    priority ENUM('Low', 'Medium', 'High', 'Emergency') DEFAULT 'Medium',
     status ENUM('Pending', 'In Progress', 'Resolved') DEFAULT 'Pending',
+    admin_notes TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    resolved_at DATETIME,
     FOREIGN KEY (location_id) REFERENCES locations(location_id)
 );
 
@@ -35,7 +39,8 @@ INSERT IGNORE INTO locations (location_id, name) VALUES
 ('BLDG-A-101', 'Building A - Room 101'),
 ('BLDG-B-LAB', 'Building B - Computer Lab'),
 ('CANTEEN', 'University Canteen'),
-('GYM', 'DOrSU Gymnasium');
+('GYM', 'DOrSU Gymnasium'),
+('UNKNOWN', 'General Campus Area');
 
 INSERT IGNORE INTO admins (username, password, full_name) VALUES 
 ('admin', 'password123', 'Maintenance Manager');

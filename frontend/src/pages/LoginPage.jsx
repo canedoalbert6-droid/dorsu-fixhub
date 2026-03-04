@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { Lock, User } from 'lucide-react';
+import { Lock, User, ShieldCheck } from 'lucide-react';
 
 const LoginPage = ({ onLogin }) => {
   const [username, setUsername] = useState('');
@@ -25,48 +25,83 @@ const LoginPage = ({ onLogin }) => {
   };
 
   return (
-    <div className="card max-w-400" style={{ marginTop: '10vh' }}>
-      <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-        <div style={{ background: 'rgba(15, 118, 110, 0.1)', width: '60px', height: '60px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem', color: 'var(--primary)' }}>
-          <Lock size={30} style={{ margin: 'auto' }} />
+    <div className="web-login-container">
+      {/* Left Side: Branding/Welcome */}
+      <div className="login-brand-side">
+        <div className="brand-overlay"></div>
+        <div className="brand-content">
+          <div className="icon-box-md" style={{ width: '100px', height: '100px', borderRadius: '24px', marginBottom: '2rem' }}>
+            <img src="/logo.ico" alt="DOrSU Logo" style={{ width: '70px' }} />
+          </div>
+          <h2>DOrSU FixHub</h2>
+          <p>The official Maintenance Reporting & Campus Innovation Tracker for Davao Oriental State University.</p>
+          <div className="login-feature-list">
+            <div className="login-feature-item">
+              <ShieldCheck size={20} />
+              <span>Secure Administrative Access</span>
+            </div>
+            <div className="login-feature-item">
+              <User size={20} />
+              <span>Real-time Maintenance Monitoring</span>
+            </div>
+          </div>
         </div>
-        <h2 style={{ marginBottom: '0.5rem' }}>Admin Access</h2>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Please enter your credentials to continue.</p>
+        <div className="brand-footer">
+            © 2026 Davao Oriental State University
+        </div>
       </div>
 
-      {error && <div className="error-text" style={{ marginBottom: '1.5rem' }}>{error}</div>}
-      
-      <form onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <User size={16} /> Username
-          </label>
-          <input 
-            type="text" 
-            className="form-control"
-            placeholder="Enter username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            required
-          />
+      {/* Right Side: Login Form */}
+      <div className="login-form-side">
+        <div className="login-form-box">
+          <div className="login-form-header">
+            <h2>Admin Login</h2>
+            <p>Enter your authorized credentials to access the management dashboard.</p>
+          </div>
+
+          {error && <div className="error-text" style={{ marginBottom: '1.5rem' }}>{error}</div>}
+
+          <form onSubmit={handleSubmit}>
+            <div className="form-group">
+              <label>Username</label>
+              <div className="input-with-icon">
+                <User size={18} className="input-icon" />
+                <input 
+                  type="text" 
+                  className="form-control"
+                  placeholder="e.g. admin_user"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>Password</label>
+              <div className="input-with-icon">
+                <Lock size={18} className="input-icon" />
+                <input 
+                  type="password" 
+                  className="form-control"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <button type="submit" className="btn-primary full-width" style={{ marginTop: '1.5rem', padding: '1.2rem' }}>
+              Sign In to Dashboard
+            </button>
+          </form>
+          
+          <div className="login-help">
+            <p>Forgot password? Contact IT Support Office.</p>
+          </div>
         </div>
-        <div className="form-group">
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Lock size={16} /> Password
-          </label>
-          <input 
-            type="password" 
-            className="form-control"
-            placeholder="••••••••"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </div>
-        <button type="submit" className="btn-primary full-width" style={{ marginTop: '1rem' }}>
-          Sign In
-        </button>
-      </form>
+      </div>
     </div>
   );
 };
