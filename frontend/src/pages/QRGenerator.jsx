@@ -5,15 +5,9 @@ import { Download, QrCode, MapPin, Globe, AlertTriangle, ExternalLink } from 'lu
 const QRGenerator = () => {
   const [locId, setLocId] = useState('BLDG-A-101');
   const [baseUrl, setBaseUrl] = useState(`http://${window.location.hostname}:5173`);
-  const [isLocalhost, setIsLocalhost] = useState(false);
-
-  useEffect(() => {
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      setIsLocalhost(true);
-    } else {
-      setIsLocalhost(false);
-    }
-  }, []);
+  const [isLocalhost] = useState(() => 
+    window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  );
 
   const reportUrl = `${baseUrl}/?loc=${locId}`;
 
@@ -23,17 +17,27 @@ const QRGenerator = () => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const img = new Image();
+    
+    // Create blob from SVG data to handle special characters
+    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+
     img.onload = () => {
       canvas.width = img.width;
       canvas.height = img.height;
+      ctx.fillStyle = "white";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0);
+      
       const pngFile = canvas.toDataURL('image/png');
       const downloadLink = document.createElement('a');
       downloadLink.download = `DOrSU-QR-${locId}.png`;
       downloadLink.href = pngFile;
       downloadLink.click();
+      
+      URL.revokeObjectURL(url);
     };
-    img.src = 'data:image/svg+xml;base64,' + btoa(svgData);
+    img.src = url;
   };
 
   return (

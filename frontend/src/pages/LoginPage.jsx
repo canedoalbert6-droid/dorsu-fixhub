@@ -1,32 +1,31 @@
+// View: Login page — UI only, logic via useAuthViewModel
 import React, { useState } from 'react';
-import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { Lock, User, ShieldCheck } from 'lucide-react';
+import { Lock, User, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import { useAuthViewModel } from '../viewmodels/useAuthViewModel';
 
 const LoginPage = ({ onLogin }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const { login } = useAuthViewModel();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const API_URL = `http://${window.location.hostname}:5000/api`;
-    try {
-      const res = await axios.post(`${API_URL}/login`, { username, password });
-      if (res.data.success) {
-        localStorage.setItem('adminToken', res.data.token);
-        onLogin(true);
-        navigate('/admin');
-      }
-    } catch (err) {
-      setError('Invalid username or password');
+    setError('');
+    const data = await login(username, password);
+    if (data.success) {
+      onLogin(true);
+      navigate('/admin');
+    } else {
+      setError(data.message || 'Invalid username or password');
     }
   };
 
   return (
     <div className="web-login-container">
-      {/* Left Side: Branding/Welcome */}
       <div className="login-brand-side">
         <div className="brand-overlay"></div>
         <div className="brand-content">
@@ -34,7 +33,7 @@ const LoginPage = ({ onLogin }) => {
             <img src="/logo.ico" alt="DOrSU Logo" style={{ width: '70px' }} />
           </div>
           <h2>DOrSU FixHub</h2>
-          <p>The official Maintenance Reporting & Campus Innovation Tracker for Davao Oriental State University.</p>
+          <p>The official Maintenance Reporting &amp; Campus Innovation Tracker for Davao Oriental State University.</p>
           <div className="login-feature-list">
             <div className="login-feature-item">
               <ShieldCheck size={20} />
@@ -51,7 +50,6 @@ const LoginPage = ({ onLogin }) => {
         </div>
       </div>
 
-      {/* Right Side: Login Form */}
       <div className="login-form-side">
         <div className="login-form-box">
           <div className="login-form-header">
@@ -66,8 +64,8 @@ const LoginPage = ({ onLogin }) => {
               <label>Username</label>
               <div className="input-with-icon">
                 <User size={18} className="input-icon" />
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   className="form-control"
                   placeholder="e.g. admin_user"
                   value={username}
@@ -79,16 +77,25 @@ const LoginPage = ({ onLogin }) => {
 
             <div className="form-group">
               <label>Password</label>
-              <div className="input-with-icon">
+              <div className="input-with-icon" style={{ position: 'relative' }}>
                 <Lock size={18} className="input-icon" />
-                <input 
-                  type="password" 
+                <input
+                  type={showPassword ? 'text' : 'password'}
                   className="form-control"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
+                  style={{ paddingRight: '40px' }}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(prev => !prev)}
+                  style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0 }}
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
             </div>
 
@@ -96,7 +103,7 @@ const LoginPage = ({ onLogin }) => {
               Sign In to Dashboard
             </button>
           </form>
-          
+
           <div className="login-help">
             <p>Forgot password? Contact IT Support Office.</p>
           </div>

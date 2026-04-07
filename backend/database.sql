@@ -10,28 +10,50 @@ CREATE TABLE IF NOT EXISTS locations (
     name VARCHAR(100) NOT NULL
 );
 
--- 2. Reports Table
+-- 2. Admins Table (with role-based access)
+-- MUST BE CREATED BEFORE REPORTS due to Foreign Key reference
+CREATE TABLE IF NOT EXISTS admins (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    full_name VARCHAR(100),
+    role ENUM('Admin', 'Technician', 'Viewer') DEFAULT 'Viewer'
+);
+
+-- 3. Reports Table
 CREATE TABLE IF NOT EXISTS reports (
     id CHAR(36) PRIMARY KEY,
+    tracking_code VARCHAR(20) UNIQUE NOT NULL,
     location_id VARCHAR(50) NOT NULL,
     report_type ENUM('Maintenance', 'Innovation') DEFAULT 'Maintenance',
     issue VARCHAR(100) NOT NULL,
     description TEXT NOT NULL,
     image_url VARCHAR(255),
+    after_fix_image_url VARCHAR(255),
+    assigned_to INT,
     priority ENUM('Low', 'Medium', 'High', 'Emergency') DEFAULT 'Medium',
     status ENUM('Pending', 'In Progress', 'Resolved') DEFAULT 'Pending',
     admin_notes TEXT,
+    time_spent_minutes INT DEFAULT 0,
+    work_started_at DATETIME,
+    work_completed_at DATETIME,
+    sla_deadline DATETIME,
+    sla_breached TINYINT(1) DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     resolved_at DATETIME,
-    FOREIGN KEY (location_id) REFERENCES locations(location_id)
+    FOREIGN KEY (location_id) REFERENCES locations(location_id),
+    FOREIGN KEY (assigned_to) REFERENCES admins(id) ON DELETE SET NULL
 );
 
--- 3. Admins Table
-CREATE TABLE IF NOT EXISTS admins (
+-- 4. Comments Table (for collaboration on reports)
+CREATE TABLE IF NOT EXISTS comments (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) UNIQUE NOT NULL,
-    password VARCHAR(255) NOT NULL, -- Use hashed passwords in production
-    full_name VARCHAR(100)
+    report_id CHAR(36) NOT NULL,
+    admin_id INT NOT NULL,
+    comment_text TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE,
+    FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE CASCADE
 );
 
 -- Seed Initial Data
@@ -42,5 +64,6 @@ INSERT IGNORE INTO locations (location_id, name) VALUES
 ('GYM', 'DOrSU Gymnasium'),
 ('UNKNOWN', 'General Campus Area');
 
-INSERT IGNORE INTO admins (username, password, full_name) VALUES 
-('admin', 'password123', 'Maintenance Manager');
+-- Default admin password is 'password123' (bcrypt hashed)
+INSERT IGNORE INTO admins (username, password, full_name, role) VALUES 
+('admin', '$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Maintenance Manager', 'Admin');
