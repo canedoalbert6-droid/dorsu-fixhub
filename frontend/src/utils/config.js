@@ -2,7 +2,7 @@
 // Offline helpers have been moved to src/services/reportService.js
 
 // Production-ready configuration using Environment Variables
-export const BASE_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:5000`;
+export const BASE_URL = import.meta.env.VITE_API_URL || `${window.location.protocol}//${window.location.hostname}:5000`;
 export const API_URL = `${BASE_URL}/api`;
 export const SOCKET_URL = BASE_URL;
 

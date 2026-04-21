@@ -15,6 +15,7 @@ import {
   addComment as addCommentService,
   updateReport,
   deleteReport,
+  scanTechnicianQR,
 } from '../services/reportService';
 
 /**
@@ -76,7 +77,9 @@ export const useAdminViewModel = (addNotification) => {
 
   useEffect(() => {
     loadData();
-    loadRecurring();
+    if (userRole === 'Admin') {
+      loadRecurring();
+    }
 
     const socket = io(SOCKET_URL);
     const notificationSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
@@ -157,6 +160,18 @@ export const useAdminViewModel = (addNotification) => {
     }
   };
 
+  const handleScan = useCallback(async (reportId, qrToken) => {
+    try {
+      const res = await scanTechnicianQR(reportId, qrToken);
+      toast.success(res.message);
+      loadData();
+      return true;
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Scan failed.');
+      return false;
+    }
+  }, [loadData]);
+
   const generatePDF = () => {
     toast.success('Preparing PDF...');
     const doc = new jsPDF();
@@ -174,6 +189,14 @@ export const useAdminViewModel = (addNotification) => {
   const filteredReports = reports.filter(r => filterStatus === 'All' ? true : r.status === filterStatus);
   const canEdit = userRole === 'Admin' || userRole === 'Technician';
   const canDelete = userRole === 'Admin';
+
+  const canEditReport = (report) => {
+    if (userRole === 'Admin') return true;
+    if (userRole === 'Technician') {
+      return report.assigned_to === getUserId() || !report.assigned_to;
+    }
+    return false;
+  };
 
   return {
     reports,
@@ -199,11 +222,13 @@ export const useAdminViewModel = (addNotification) => {
     slaBreachedCount,
     canEdit,
     canDelete,
+    canEditReport,
     loadData,
     loadComments,
     handleUpdate,
     handleDelete,
     handleAddComment,
+    handleScan,
     generatePDF,
   };
 };

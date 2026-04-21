@@ -181,7 +181,7 @@ app.post('/api/login', async (req, res, next) => {
     const validPassword = await bcrypt.compare(password, rows[0].password);
     if (!validPassword) return res.status(401).json({ success: false, message: 'Invalid credentials' });
     const token = jwt.sign({ id: rows[0].id, username: rows[0].username, role: rows[0].role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
-    res.json({ success: true, token, user: { id: rows[0].id, username: rows[0].username, name: rows[0].full_name, role: rows[0].role } });
+    res.json({ success: true, token, user: { id: rows[0].id, username: rows[0].username, name: rows[0].full_name, role: rows[0].role, qrToken: rows[0].qr_token } });
   } catch (err) { next(err); }
 });
 
@@ -219,7 +219,7 @@ app.get('/api/reports', authenticateToken, async (req, res, next) => {
 
     // Technicians only see their assigned reports
     if (req.user.role === 'Technician') {
-      whereClause += ' AND (assigned_to = ? OR assigned_to IS NULL)';
+      whereClause += ' AND assigned_to = ?';
       params.push(req.user.id);
     }
     if (statusFilter && statusFilter !== 'All') { whereClause += ' AND status = ?'; params.push(statusFilter); }
@@ -418,12 +418,66 @@ app.get('/api/technicians/stats', authenticateToken, requireRole('Admin'), async
 
 // ─── Admin Management Endpoints ────────────────────────────────────────
 
+// Admin scans Technician QR Code to update report status
+// Pending -> In Progress (Start)
+// In Progress -> Resolved (Complete)
+app.post('/api/reports/:id/scan', authenticateToken, requireRole('Admin'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { qrToken } = req.body;
+    if (!qrToken) return res.status(400).json({ error: 'Technician QR Token is required.' });
+
+    // 1. Find technician by qrToken
+    const [techs] = await db.query('SELECT id, full_name FROM admins WHERE qr_token = ? AND role IN ("Technician", "Admin")', [qrToken]);
+    if (techs.length === 0) return res.status(404).json({ error: 'Invalid Technician QR Code.' });
+    const technician = techs[0];
+
+    // 2. Get current report status
+    const [reports] = await db.query('SELECT status, assigned_to FROM reports WHERE id = ?', [id]);
+    if (reports.length === 0) return res.status(404).json({ error: 'Report not found.' });
+    const report = reports[0];
+
+    let newStatus = '';
+    let updates = [];
+    let params = [];
+
+    if (report.status === 'Pending') {
+      newStatus = 'In Progress';
+      updates.push('status = ?', 'work_started_at = COALESCE(work_started_at, NOW())', 'assigned_to = ?');
+      params.push(newStatus, technician.id);
+    } else if (report.status === 'In Progress') {
+      if (report.assigned_to && report.assigned_to !== technician.id) {
+        return res.status(403).json({ error: 'This report is assigned to a different technician.' });
+      }
+      newStatus = 'Resolved';
+      updates.push('status = ?', 'resolved_at = NOW()', 'work_completed_at = NOW()');
+      params.push(newStatus);
+    } else {
+      return res.status(400).json({ error: `Report is already ${report.status}.` });
+    }
+
+    const query = `UPDATE reports SET ${updates.join(', ')} WHERE id = ?`;
+    params.push(id);
+
+    await db.query(query, params);
+    const [updated] = await db.query('SELECT * FROM reports WHERE id = ?', [id]);
+    io.emit('reportUpdated', updated[0]);
+    
+    res.json({ 
+      message: `Report marked as ${newStatus} by ${technician.full_name}`, 
+      status: newStatus,
+      technician: technician.full_name 
+    });
+  } catch (err) { next(err); }
+});
+
 // Create Admin User (Admin Only)
 app.post('/api/admins', authenticateToken, requireRole('Admin'), async (req, res, next) => {
   try {
     const { username, password, fullName, role } = adminUserSchema.parse(req.body);
     const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    await db.query('INSERT INTO admins (username, password, full_name, role) VALUES (?, ?, ?, ?)', [username, hashedPassword, fullName, role]);
+    const qrToken = uuidv4();
+    await db.query('INSERT INTO admins (username, password, full_name, role, qr_token) VALUES (?, ?, ?, ?, ?)', [username, hashedPassword, fullName, role, qrToken]);
     res.status(201).json({ message: 'User created successfully!' });
   } catch (err) { next(err); }
 });
@@ -541,6 +595,19 @@ app.get('/api/public/status', async (req, res, next) => {
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
-server.listen(PORT, () => {
-  console.log(`Real-time API running at http://localhost:${PORT}`);
+const os = require('os');
+const getNetworkIP = () => {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+    }
+  }
+  return 'localhost';
+};
+
+server.listen(PORT, '0.0.0.0', () => {
+  const ip = getNetworkIP();
+  console.log(`\x1b[32m%s\x1b[0m`, `Real-time API running at http://${ip}:${PORT}`);
+  console.log(`\x1b[33m%s\x1b[0m`, `Mobile Access: http://${ip}:${PORT}`);
 });

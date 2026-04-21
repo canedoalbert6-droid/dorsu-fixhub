@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS admins (
     username VARCHAR(50) UNIQUE NOT NULL,
     password VARCHAR(255) NOT NULL,
     full_name VARCHAR(100),
-    role ENUM('Admin', 'Technician', 'Viewer') DEFAULT 'Viewer'
+    role ENUM('Admin', 'Technician', 'Viewer') DEFAULT 'Viewer',
+    qr_token VARCHAR(255) UNIQUE
 );
 
 -- 3. Reports Table
@@ -65,5 +66,5 @@ INSERT IGNORE INTO locations (location_id, name) VALUES
 ('UNKNOWN', 'General Campus Area');
 
 -- Default admin password is 'password123' (bcrypt hashed)
-INSERT IGNORE INTO admins (username, password, full_name, role) VALUES 
-('admin', '$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Maintenance Manager', 'Admin');
+INSERT IGNORE INTO admins (username, password, full_name, role, qr_token) VALUES 
+('admin', '$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Maintenance Manager', 'Admin', 'admin-default-qr-token-123');

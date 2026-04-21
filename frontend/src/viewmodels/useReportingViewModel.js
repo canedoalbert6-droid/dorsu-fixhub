@@ -53,10 +53,10 @@ export const useReportingViewModel = () => {
     if (!isOnline) return;
     fetchLocation(locationId)
       .then(res => setLocationName(res.name))
-      .catch(() => setLocationName('General Campus Area'));
+      .catch(() => setLocationName('Main Campus'));
     fetchRecentReportsForLocation(locationId)
       .then(setRecentReports)
-      .catch(() => {});
+      .catch(() => { });
     setPendingCount(getOfflineReports().length);
   }, [locationId, isOnline]);
 

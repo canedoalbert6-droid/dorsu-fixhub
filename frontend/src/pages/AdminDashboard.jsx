@@ -1,12 +1,15 @@
 // View: Admin dashboard — UI only, all logic via useAdminViewModel
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { RefreshCcw, List, BarChart3, FileText, Map as MapIcon, AlertCircle, Lightbulb, Trash2, MessageSquare, TrendingUp, AlertTriangle, Shield, Eye, Wrench, Search, X, Activity, UserPlus, MapPin, Camera, Clock, Users, Settings, Calendar, CheckCircle } from 'lucide-react';
+import { RefreshCcw, List, BarChart3, FileText, Map as MapIcon, AlertCircle, Lightbulb, Trash2, MessageSquare, TrendingUp, AlertTriangle, Shield, Eye, Wrench, Search, X, Activity, UserPlus, MapPin, Camera, Clock, Users, Settings, Calendar, CheckCircle, QrCode, ScanLine, XCircle } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import { QRCodeSVG } from 'qrcode.react';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 import Analytics from './Analytics';
 import { useAdminViewModel } from '../viewmodels/useAdminViewModel';
 import { getPriorityColor, isSlaBreached, getAuthHeader } from '../models/reportModel';
+import { getQrToken } from '../models/authModel';
 import { API_URL, BASE_URL } from '../utils/config';
 import { formatTime, formatActivityTime, getGreeting } from '../utils/time';
 
@@ -52,13 +55,62 @@ const AdminDashboard = ({ addNotification }) => {
     slaBreachedCount,
     canEdit,
     canDelete,
+    canEditReport,
     loadData,
     loadComments,
     handleUpdate,
     handleDelete,
     handleAddComment,
+    handleScan,
     generatePDF,
   } = useAdminViewModel(addNotification);
+
+  const [activeScanReport, setActiveScanReport] = useState(null);
+  const [showMyQR, setShowMyQR] = useState(false);
+  const scannerRef = useRef(null);
+  const [isSecure] = useState(() => window.isSecureContext);
+
+  const isAdmin = userRole === 'Admin';
+  const isTechnician = userRole === 'Technician';
+
+  useEffect(() => {
+    let scanner = null;
+    
+    if (activeScanReport && isAdmin) {
+      // Small timeout to ensure the "reader" div is rendered in the DOM by AnimatePresence
+      const timer = setTimeout(() => {
+        const readerElement = document.getElementById("reader");
+        if (!readerElement) return;
+
+        scanner = new Html5QrcodeScanner("reader", { 
+          fps: 10, 
+          qrbox: { width: 250, height: 250 },
+          rememberLastUsedCamera: true,
+          supportedScanTypes: [0] // 0 = QR
+        }, false);
+
+        scanner.render(async (decodedText) => {
+          const success = await handleScan(activeScanReport.id, decodedText);
+          if (success) {
+            scanner.clear().catch(e => console.warn(e));
+            setActiveScanReport(null);
+          }
+        }, (error) => {
+          // silence scan errors
+        });
+
+        scannerRef.current = scanner;
+      }, 300);
+
+      return () => {
+        clearTimeout(timer);
+        if (scannerRef.current) {
+          scannerRef.current.clear().catch(e => console.warn('Scanner clear error', e));
+          scannerRef.current = null;
+        }
+      };
+    }
+  }, [activeScanReport, isAdmin, handleScan]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -76,8 +128,6 @@ const AdminDashboard = ({ addNotification }) => {
   const [newUser, setNewUser] = useState({ username: '', password: '', fullName: '', role: 'Technician' });
   const [newLocation, setNewLocation] = useState({ locationId: '', name: '' });
 
-  const isAdmin = userRole === 'Admin';
-  const isTechnician = userRole === 'Technician';
 
   const fetchTechnicians = async () => {
     try {
@@ -321,6 +371,15 @@ const AdminDashboard = ({ addNotification }) => {
 
         <div className="controls">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginRight: '12px' }}>
+            {isTechnician && (
+              <button 
+                onClick={() => setShowMyQR(true)} 
+                className="btn-small" 
+                style={{ background: 'rgba(79, 70, 229, 0.1)', color: '#4f46e5', border: '1px solid rgba(79, 70, 229, 0.2)', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <QrCode size={14} /> My QR
+              </button>
+            )}
             <span style={{ background: 'var(--bg)', padding: '4px 10px', borderRadius: '8px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
               {getRoleIcon(userRole)} {userRole}
             </span>
@@ -632,28 +691,50 @@ const AdminDashboard = ({ addNotification }) => {
 
                       {/* Admin: Assign to Technician */}
                       {isAdmin && (
-                        <div style={{ position: 'relative' }}>
-                          <button onClick={() => { setShowAssignMenu(showAssignMenu === report.id ? null : report.id); if (technicians.length === 0) fetchTechnicians(); }} className="btn-small" style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(37, 99, 235, 0.1)', color: '#2563eb' }} title="Assign Technician">
-                            <UserPlus size={14} /> {report.assigned_name ? 'Reassign' : 'Assign'}
-                          </button>
-                          {showAssignMenu === report.id && (
-                            <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} style={{ position: 'absolute', bottom: '100%', left: 0, marginBottom: '8px', background: 'var(--surface)', borderRadius: '10px', boxShadow: 'var(--shadow-lg)', border: '1px solid var(--border)', minWidth: '200px', zIndex: 50, overflow: 'hidden' }}>
-                              <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)' }}>Assign Technician</div>
-                              {technicians.map(t => (
-                                <button key={t.id} onClick={() => handleAssign(report.id, t.id)} style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '10px 12px', border: 'none', background: report.assigned_to === t.id ? 'var(--bg)' : 'transparent', cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text-main)', textAlign: 'left' }}>
-                                  <div className="avatar-circle" style={{ width: '24px', height: '24px', fontSize: '0.65rem' }}>{t.full_name?.charAt(0)}</div>
-                                  {t.full_name} {report.assigned_to === t.id && '✓'}
-                                </button>
-                              ))}
-                              {report.assigned_to && (
-                                <button onClick={() => handleUnassign(report.id)} style={{ width: '100%', padding: '8px 12px', border: 'none', borderTop: '1px solid var(--border)', background: 'rgba(220, 38, 38, 0.05)', color: '#dc2626', cursor: 'pointer', fontSize: '0.8rem', fontWeight: '600' }}>Unassign</button>
-                              )}
-                            </motion.div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <div style={{ position: 'relative' }}>
+                            <button onClick={() => { setShowAssignMenu(showAssignMenu === report.id ? null : report.id); if (technicians.length === 0) fetchTechnicians(); }} className="btn-small" style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(37, 99, 235, 0.1)', color: '#2563eb' }} title="Assign Technician">
+                              <UserPlus size={14} /> {report.assigned_name ? 'Reassign' : 'Assign'}
+                            </button>
+                            {showAssignMenu === report.id && (
+                              <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} style={{ position: 'absolute', bottom: '100%', left: 0, marginBottom: '8px', background: 'var(--surface)', borderRadius: '10px', boxShadow: 'var(--shadow-lg)', border: '1px solid var(--border)', minWidth: '200px', zIndex: 50, overflow: 'hidden' }}>
+                                <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)' }}>Assign Technician</div>
+                                {technicians.map(t => (
+                                  <button key={t.id} onClick={() => handleAssign(report.id, t.id)} style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '10px 12px', border: 'none', background: report.assigned_to === t.id ? 'var(--bg)' : 'transparent', cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text-main)', textAlign: 'left' }}>
+                                    <div className="avatar-circle" style={{ width: '24px', height: '24px', fontSize: '0.65rem' }}>{t.full_name?.charAt(0)}</div>
+                                    {t.full_name} {report.assigned_to === t.id && '✓'}
+                                  </button>
+                                ))}
+                                {report.assigned_to && (
+                                  <button onClick={() => handleUnassign(report.id)} style={{ width: '100%', padding: '8px 12px', border: 'none', borderTop: '1px solid var(--border)', background: 'rgba(220, 38, 38, 0.05)', color: '#dc2626', cursor: 'pointer', fontSize: '0.8rem', fontWeight: '600' }}>Unassign</button>
+                                )}
+                              </motion.div>
+                            )}
+                          </div>
+                          {report.status === 'Pending' && (
+                            <button 
+                              onClick={() => setActiveScanReport(report)} 
+                              className="btn-small" 
+                              style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(79, 70, 229, 0.1)', color: '#4f46e5' }}
+                              title="Scan Technician QR to Start"
+                            >
+                              <ScanLine size={14} /> Start Repair
+                            </button>
+                          )}
+                          {report.status === 'In Progress' && (
+                            <button 
+                              onClick={() => setActiveScanReport(report)} 
+                              className="btn-small" 
+                              style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(22, 163, 74, 0.1)', color: '#16a34a' }}
+                              title="Scan Technician QR to Resolve"
+                            >
+                              <ScanLine size={14} /> Scan to Resolve
+                            </button>
                           )}
                         </div>
                       )}
 
-                      {canEdit && (
+                      {canEditReport(report) && (
                         <>
                           <button onClick={() => { setShowComments(showComments === report.id ? null : report.id); if (!comments[report.id]) loadComments(report.id); }} className="btn-small" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                             <MessageSquare size={14} /> {comments[report.id]?.length || 0}
@@ -669,19 +750,35 @@ const AdminDashboard = ({ addNotification }) => {
 
                           {/* Technician: Track Time */}
                           {isTechnician && (
-                            <button onClick={() => setShowTimeInput(showTimeInput === report.id ? null : report.id)} className="btn-small" style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(202, 138, 4, 0.1)', color: '#ca8a04' }}>
-                              <Clock size={14} /> Time
-                            </button>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button onClick={() => setShowTimeInput(showTimeInput === report.id ? null : report.id)} className="btn-small" style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(202, 138, 4, 0.1)', color: '#ca8a04' }}>
+                                <Clock size={14} /> Time
+                              </button>
+                            </div>
                           )}
 
                           {report.status !== 'Resolved' && (
                             <button onClick={() => setEditingNotes(report.id)} className="btn-small">Add Log</button>
                           )}
-                          <select value={report.status} onChange={(e) => handleUpdateWithLog(report.id, e.target.value, report.admin_notes)} className="status-select">
-                            <option value="Pending">Pending</option>
-                            <option value="In Progress">In Progress</option>
-                            <option value="Resolved">Resolved</option>
-                          </select>
+                          {isAdmin ? (
+                            <select value={report.status} onChange={(e) => handleUpdateWithLog(report.id, e.target.value, report.admin_notes)} className="status-select">
+                              <option value="Pending">Pending</option>
+                              <option value="In Progress">In Progress</option>
+                              <option value="Resolved">Resolved</option>
+                            </select>
+                          ) : (
+                            <span className="status-badge-static" style={{ 
+                              fontSize: '0.75rem', 
+                              fontWeight: '700', 
+                              padding: '6px 12px', 
+                              borderRadius: '8px',
+                              background: 'var(--bg)',
+                              border: '1px solid var(--border)',
+                              color: 'var(--text-main)'
+                            }}>
+                              {report.status}
+                            </span>
+                          )}
                         </>
                       )}
                     </div>
@@ -715,6 +812,50 @@ const AdminDashboard = ({ addNotification }) => {
           )}
         </div>
       )}
+      {/* QR Scanner Modal */}
+      <AnimatePresence>
+        {activeScanReport && (
+          <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="card" style={{ maxWidth: '500px', width: '100%', position: 'relative' }}>
+              <button onClick={() => setActiveScanReport(null)} style={{ position: 'absolute', right: '15px', top: '15px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><XCircle size={24} /></button>
+              <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+                <h3 style={{ margin: '0 0 10px' }}>
+                  {activeScanReport.status === 'Pending' ? 'Start Repair (Scan Tech)' : 'Resolve Repair (Scan Tech)'}
+                </h3>
+                {/* Security warning removed - user is using Chrome flags */}
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  {activeScanReport.status === 'Pending' 
+                    ? `Assign this task by scanning the technician's QR code.` 
+                    : `Mark this task as resolved by scanning the technician's QR code.`}
+                  <br/><strong>{activeScanReport.issue}</strong>
+                </p>
+              </div>
+              <div id="reader" style={{ width: '100%', borderRadius: '12px', overflow: 'hidden', border: '2px solid var(--border)' }}></div>
+              <p style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Position the QR code within the frame to scan.</p>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Technician My QR Modal */}
+      <AnimatePresence>
+        {showMyQR && (
+          <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="card" style={{ maxWidth: '400px', width: '100%', position: 'relative', textAlign: 'center' }}>
+              <button onClick={() => setShowMyQR(false)} style={{ position: 'absolute', right: '15px', top: '15px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><XCircle size={24} /></button>
+              <div className="icon-box-md" style={{ margin: '0 auto 1.5rem', background: 'rgba(79, 70, 229, 0.1)', color: '#4f46e5' }}><QrCode size={30} /></div>
+              <h3 style={{ margin: '0 0 10px' }}>Your Technician QR</h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '2rem' }}>Present this QR code to the Admin to start or resolve a repair task.</p>
+              <div style={{ background: '#fff', padding: '20px', borderRadius: '20px', display: 'inline-block', boxShadow: 'var(--shadow-md)', border: '1px solid var(--border)', marginBottom: '1.5rem' }}>
+                <QRCodeSVG value={getQrToken()} size={200} level="H" includeMargin={true} />
+              </div>
+              <div style={{ background: 'var(--bg)', padding: '12px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: '700', color: 'var(--primary)' }}>
+                {localStorage.getItem('userName')}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

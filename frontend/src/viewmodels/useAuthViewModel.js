@@ -22,7 +22,8 @@ export const useAuthViewModel = () => {
         token: data.token, 
         role: data.user.role, 
         name: data.user.name,
-        id: data.user.id 
+        id: data.user.id,
+        qrToken: data.user.qrToken
       });
       setIsAuthenticated(true);
     }

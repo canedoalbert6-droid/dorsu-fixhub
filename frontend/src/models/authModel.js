@@ -3,6 +3,7 @@
 export const getToken = () => localStorage.getItem('adminToken');
 export const getRole = () => localStorage.getItem('userRole') || 'Viewer';
 export const getUserName = () => localStorage.getItem('userName') || '';
+export const getQrToken = () => localStorage.getItem('qrToken') || '';
 export const getUserId = () => {
   const id = localStorage.getItem('userId');
   if (id) return parseInt(id);
@@ -29,11 +30,12 @@ export const isTokenValid = () => {
   }
 };
 
-export const saveAuth = ({ token, role, name, id }) => {
+export const saveAuth = ({ token, role, name, id, qrToken }) => {
   localStorage.setItem('adminToken', token);
   localStorage.setItem('userRole', role);
   localStorage.setItem('userName', name);
   localStorage.setItem('userId', id);
+  if (qrToken) localStorage.setItem('qrToken', qrToken);
 };
 
 export const clearAuth = () => {
@@ -41,6 +43,7 @@ export const clearAuth = () => {
   localStorage.removeItem('userRole');
   localStorage.removeItem('userName');
   localStorage.removeItem('userId');
+  localStorage.removeItem('qrToken');
 };
 
 export const getAuthHeader = () => ({

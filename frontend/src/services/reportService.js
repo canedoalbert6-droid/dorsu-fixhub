@@ -69,6 +69,13 @@ export const unassignReport = async (reportId) => {
   return res.data;
 };
 
+export const scanTechnicianQR = async (reportId, qrToken) => {
+  const res = await axios.post(`${API_URL}/reports/${reportId}/scan`, { qrToken }, {
+    headers: getAuthHeader()
+  });
+  return res.data;
+};
+
 export const fetchTechnicians = async () => {
   const res = await axios.get(`${API_URL}/technicians`, { headers: getAuthHeader() });
   return res.data;

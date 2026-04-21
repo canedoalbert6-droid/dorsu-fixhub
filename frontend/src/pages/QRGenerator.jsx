@@ -4,7 +4,7 @@ import { Download, QrCode, MapPin, Globe, AlertTriangle, ExternalLink } from 'lu
 
 const QRGenerator = () => {
   const [locId, setLocId] = useState('BLDG-A-101');
-  const [baseUrl, setBaseUrl] = useState(`http://${window.location.hostname}:5173`);
+  const [baseUrl, setBaseUrl] = useState(`${window.location.protocol}//${window.location.hostname}:5173`);
   const [isLocalhost] = useState(() => 
     window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
   );
