@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS admins (
 CREATE TABLE IF NOT EXISTS reports (
     id CHAR(36) PRIMARY KEY,
     tracking_code VARCHAR(20) UNIQUE NOT NULL,
+    reporter_name VARCHAR(100) DEFAULT NULL,
     location_id VARCHAR(50) NOT NULL,
     report_type ENUM('Maintenance', 'Innovation') DEFAULT 'Maintenance',
     issue VARCHAR(100) NOT NULL,
@@ -36,12 +37,29 @@ CREATE TABLE IF NOT EXISTS reports (
     status ENUM('Pending', 'In Progress', 'Resolved') DEFAULT 'Pending',
     admin_notes TEXT,
     time_spent_minutes INT DEFAULT 0,
-    work_started_at DATETIME,
-    work_completed_at DATETIME,
+    
+    -- Work Order Form Fields
+    department VARCHAR(100),
+    classroom_office VARCHAR(100),
+    date_needed DATE,
+    date_started DATE,
+    time_started TIME,
+    time_finished TIME,
+    date_completed DATE,
+    work_description TEXT,
+    work_details TEXT,
+    requested_by VARCHAR(100),
+    inspected_by VARCHAR(100),
+    conformed_by VARCHAR(100),
+    workmanship_rating ENUM('Outstanding', 'Very Satisfactory', 'Satisfactory', 'Unsatisfactory', 'Poor'),
+    approval_status ENUM('Pending', 'Approved', 'Rejected') DEFAULT 'Pending',
+
     sla_deadline DATETIME,
     sla_breached TINYINT(1) DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     resolved_at DATETIME,
+    work_started_at DATETIME,
+    work_completed_at DATETIME,
     FOREIGN KEY (location_id) REFERENCES locations(location_id),
     FOREIGN KEY (assigned_to) REFERENCES admins(id) ON DELETE SET NULL
 );
@@ -57,12 +75,26 @@ CREATE TABLE IF NOT EXISTS comments (
     FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE CASCADE
 );
 
+-- 5. Materials Reconciliation Table
+CREATE TABLE IF NOT EXISTS report_materials (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    report_id CHAR(36),
+    material_name VARCHAR(255),
+    material_source ENUM('stock', 'petty cash', 'procurement'),
+    qty_in INT DEFAULT 0,
+    qty_used INT DEFAULT 0,
+    qty_out INT DEFAULT 0,
+    FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE
+);
+
 -- Seed Initial Data
 INSERT IGNORE INTO locations (location_id, name) VALUES 
-('BLDG-A-101', 'Building A - Room 101'),
-('BLDG-B-LAB', 'Building B - Computer Lab'),
+('BLDG-A', 'Building A (Main)'),
+('BLDG-B', 'Building B (Science/IT)'),
+('LIBRARY', 'University Library'),
 ('CANTEEN', 'University Canteen'),
 ('GYM', 'DOrSU Gymnasium'),
+('HUB', 'Innovation Hub'),
 ('UNKNOWN', 'General Campus Area');
 
 -- Default admin password is 'password123' (bcrypt hashed)

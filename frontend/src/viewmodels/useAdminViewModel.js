@@ -11,11 +11,16 @@ import {
   fetchReports,
   fetchBuildingHealth,
   fetchRecurringIssues,
+  fetchLocations,
   fetchComments as fetchCommentsService,
   addComment as addCommentService,
   updateReport,
   deleteReport,
   scanTechnicianQR,
+  uploadAfterFixPhoto,
+  fetchReportMaterials,
+  saveWorkOrder,
+  updateWorkOrderApproval,
 } from '../services/reportService';
 
 /**
@@ -33,8 +38,12 @@ export const useAdminViewModel = (addNotification) => {
   const [comments, setComments] = useState({});
   const [showComments, setShowComments] = useState(null);
   const [commentInput, setCommentInput] = useState({});
+  const [materials, setMaterials] = useState({});
+  const [showMaterials, setShowMaterials] = useState(null);
   const [recurringIssues, setRecurringIssues] = useState([]);
+  const [locations, setLocations] = useState([]);
   const [userRole] = useState(() => getRole());
+  const [showOnlyMine, setShowOnlyMine] = useState(userRole === 'Technician');
   const [pendingCount, setPendingCount] = useState(0);
   const [slaBreachedCount, setSlaBreachedCount] = useState(0);
 
@@ -51,12 +60,18 @@ export const useAdminViewModel = (addNotification) => {
       setBuildingHealth(healthData);
       setPendingCount(repData.data.filter(r => r.status === 'Pending').length);
       setSlaBreachedCount(repData.data.filter(r => r.sla_breached === 1 && r.status !== 'Resolved').length);
-    } catch {
-      toast.error('Sync failed.');
+
+      if (userRole === 'Admin' || userRole === 'Technician') {
+        const locData = await fetchLocations().catch(() => []);
+        setLocations(locData);
+      }
+    } catch (err) {
+      console.error('[loadData Error]', err);
+      toast.error('Sync failed: ' + (err.response?.data?.error || err.message));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [userRole]);
 
   const loadRecurring = useCallback(async () => {
     try {
@@ -70,6 +85,15 @@ export const useAdminViewModel = (addNotification) => {
       setComments(prev => ({ ...prev, [reportId]: data }));
     } catch {
       setComments(prev => ({ ...prev, [reportId]: [] }));
+    }
+  }, []);
+
+  const loadMaterials = useCallback(async (reportId) => {
+    try {
+      const data = await fetchReportMaterials(reportId);
+      setMaterials(prev => ({ ...prev, [reportId]: data }));
+    } catch {
+      setMaterials(prev => ({ ...prev, [reportId]: [] }));
     }
   }, []);
 
@@ -160,6 +184,55 @@ export const useAdminViewModel = (addNotification) => {
     }
   };
 
+  const addMaterialRow = (reportId) => {
+    const newMaterial = { id: Date.now(), material_name: '', material_source: 'stock', qty_in: 0, qty_used: 0, qty_out: 0 };
+    setMaterials(prev => ({ ...prev, [reportId]: [...(prev[reportId] || []), newMaterial] }));
+  };
+
+  const removeMaterialRow = (reportId, materialId) => {
+    setMaterials(prev => ({ ...prev, [reportId]: (prev[reportId] || []).filter(m => m.id !== materialId && m.material_id !== materialId) }));
+  };
+
+  const updateMaterial = (reportId, materialId, field, value) => {
+    setMaterials(prev => ({
+      ...prev,
+      [reportId]: (prev[reportId] || []).map(m => (m.id === materialId || m.material_id === materialId) ? { ...m, [field]: value } : m)
+    }));
+  };
+
+  const handleSaveWorkOrder = async (reportId, workOrderData) => {
+    const loadingToast = toast.loading('Saving Work Order...');
+    try {
+      // Clean materials: ensure numeric types
+      const cleanedMaterials = (materials[reportId] || [])
+        .filter(m => m.material_name.trim() !== '')
+        .map(m => ({
+          material_name: m.material_name,
+          material_source: m.material_source,
+          qty_in: parseInt(m.qty_in) || 0,
+          qty_used: parseInt(m.qty_used) || 0,
+          qty_out: parseInt(m.qty_out) || 0
+        }));
+
+      await saveWorkOrder(reportId, { ...workOrderData, materials: cleanedMaterials });
+      toast.success('Work Order saved!', { id: loadingToast });
+      loadData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to save Work Order.', { id: loadingToast });
+    }
+  };
+
+  const handleApproveWorkOrder = async (reportId, status) => {
+    const loadingToast = toast.loading(`${status === 'Approved' ? 'Approving' : 'Rejecting'}...`);
+    try {
+      await updateWorkOrderApproval(reportId, status);
+      toast.success(`Work Order ${status}!`, { id: loadingToast });
+      loadData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Action failed.', { id: loadingToast });
+    }
+  };
+
   const handleScan = useCallback(async (reportId, qrToken) => {
     try {
       const res = await scanTechnicianQR(reportId, qrToken);
@@ -171,6 +244,18 @@ export const useAdminViewModel = (addNotification) => {
       return false;
     }
   }, [loadData]);
+
+  const handleAfterFixPhoto = async (reportId, file) => {
+    if (!file) return;
+    const loadingToast = toast.loading('Uploading photo...');
+    try {
+      await uploadAfterFixPhoto(reportId, file);
+      toast.success('Photo uploaded!', { id: loadingToast });
+      loadData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Upload failed.', { id: loadingToast });
+    }
+  };
 
   const generatePDF = () => {
     toast.success('Preparing PDF...');
@@ -186,7 +271,12 @@ export const useAdminViewModel = (addNotification) => {
 
   // ── Derived State ──────────────────────────────────────────────────────────
 
-  const filteredReports = reports.filter(r => filterStatus === 'All' ? true : r.status === filterStatus);
+  const filteredReports = reports.filter(r => {
+    const matchesStatus = filterStatus === 'All' ? true : r.status === filterStatus;
+    const matchesMine = showOnlyMine ? r.assigned_to === getUserId() : true;
+    return matchesStatus && matchesMine;
+  });
+
   const canEdit = userRole === 'Admin' || userRole === 'Technician';
   const canDelete = userRole === 'Admin';
 
@@ -216,8 +306,15 @@ export const useAdminViewModel = (addNotification) => {
     setShowComments,
     commentInput,
     setCommentInput,
+    materials,
+    showMaterials,
+    setShowMaterials,
     recurringIssues,
+    locations,
+    setLocations,
     userRole,
+    showOnlyMine,
+    setShowOnlyMine,
     pendingCount,
     slaBreachedCount,
     canEdit,
@@ -225,9 +322,16 @@ export const useAdminViewModel = (addNotification) => {
     canEditReport,
     loadData,
     loadComments,
+    loadMaterials,
+    addMaterialRow,
+    removeMaterialRow,
+    updateMaterial,
+    handleSaveWorkOrder,
+    handleApproveWorkOrder,
     handleUpdate,
     handleDelete,
     handleAddComment,
+    handleAfterFixPhoto,
     handleScan,
     generatePDF,
   };

@@ -31,6 +31,7 @@ const SLA_HOURS = { Emergency: 2, High: 8, Medium: 24, Low: 72 };
 
 app.use(cors({ origin: '*', credentials: false }));
 app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 if (!fs.existsSync('./uploads')) {
@@ -72,11 +73,30 @@ const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
 
 // --- Zod Schemas ---
 const loginSchema = z.object({ username: z.string().min(1), password: z.string().min(1) });
+const materialSchema = z.object({
+  material_name: z.string().min(1),
+  material_source: z.enum(['stock', 'petty cash', 'procurement']),
+  qty_in: z.number().int().min(0),
+  qty_used: z.number().int().min(0),
+  qty_out: z.number().int().min(0),
+});
+
 const reportSchema = z.object({
   locationId: z.string().min(1),
+  reporterName: z.string().max(100).optional().default(''),
   issue: z.string().min(1).max(100),
   description: z.string().min(1).max(1000),
   reportType: z.enum(['Maintenance', 'Innovation']).optional().default('Maintenance'),
+  department: z.string().optional(),
+  classroomOffice: z.string().optional(),
+  dateNeeded: z.string().optional(),
+  workDescription: z.string().optional(),
+  workDetails: z.string().optional(),
+  requestedBy: z.string().optional(),
+  inspectedBy: z.string().optional(),
+  conformedBy: z.string().optional(),
+  workmanshipRating: z.enum(['Outstanding', 'Very Satisfactory', 'Satisfactory', 'Unsatisfactory', 'Poor']).nullable().or(z.literal('')).optional(),
+  materials: z.string().optional(), // JSON string from frontend
 });
 const updateReportSchema = z.object({
   status: z.enum(['Pending', 'In Progress', 'Resolved']).optional(),
@@ -86,6 +106,24 @@ const updateReportSchema = z.object({
 const commentSchema = z.object({ commentText: z.string().min(1).max(1000) });
 const assignSchema = z.object({ technicianId: z.number().int().positive() });
 const timeSchema = z.object({ minutes: z.number().int().min(0).max(1440) });
+
+const workOrderSchema = z.object({
+  department: z.string().optional(),
+  classroomOffice: z.string().optional(),
+  dateNeeded: z.string().optional(),
+  dateStarted: z.string().optional(),
+  timeStarted: z.string().optional(),
+  timeFinished: z.string().optional(),
+  dateCompleted: z.string().optional(),
+  workDescription: z.string().optional(),
+  workDetails: z.string().optional(),
+  requestedBy: z.string().optional(),
+  inspectedBy: z.string().optional(),
+  conformedBy: z.string().optional(),
+  workmanshipRating: z.enum(['Outstanding', 'Very Satisfactory', 'Satisfactory', 'Unsatisfactory', 'Poor']).nullable().or(z.literal('')).optional(),
+  materials: z.array(materialSchema).optional(),
+});
+
 const slaOverrideSchema = z.object({ slaDeadline: z.string().datetime() });
 const adminUserSchema = z.object({
   username: z.string().min(3).max(50),
@@ -138,7 +176,7 @@ const requireRole = (...roles) => (req, res, next) => {
 
 // --- Error Handling Middleware ---
 const errorHandler = (err, req, res, next) => {
-  console.error(`[ERROR] ${req.method} ${req.url}:`, err.message);
+  console.error(`[ERROR] ${req.method} ${req.url}:`, err);
   if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed', details: err.errors });
   if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Duplicate entry detected.' });
   if (err instanceof multer.MulterError) {
@@ -171,6 +209,34 @@ io.on('connection', (socket) => {
 
 // --- API ENDPOINTS ---
 
+// Rate Workmanship (public via tracking code)
+app.post('/api/reports/track/:trackingCode/rate', async (req, res, next) => {
+  console.log(`[DEBUG] Rating request received for: ${req.params.trackingCode}`);
+  try {
+    const { trackingCode } = req.params;
+    const { rating } = req.body;
+    
+    const validRatings = ['Outstanding', 'Very Satisfactory', 'Satisfactory', 'Unsatisfactory', 'Poor'];
+    if (!validRatings.includes(rating)) {
+      return res.status(400).json({ error: 'Invalid rating value.' });
+    }
+
+    const [rows] = await db.query('SELECT id, status FROM reports WHERE tracking_code = ?', [trackingCode]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Report not found.' });
+    if (rows[0].status !== 'Resolved') {
+      return res.status(400).json({ error: 'You can only rate resolved reports.' });
+    }
+
+    await db.query('UPDATE reports SET workmanship_rating = ? WHERE tracking_code = ?', [rating, trackingCode]);
+    
+    // Notify admins of the new rating
+    const [updated] = await db.query('SELECT * FROM reports WHERE id = ?', [rows[0].id]);
+    io.emit('reportUpdated', updated[0]);
+
+    res.json({ message: 'Thank you for your feedback!' });
+  } catch (err) { next(err); }
+});
+
 // Login
 app.post('/api/login', async (req, res, next) => {
   try {
@@ -187,22 +253,69 @@ app.post('/api/login', async (req, res, next) => {
 
 // Submit Report
 app.post('/api/reports', upload.single('image'), async (req, res, next) => {
+  if (!db) return res.status(503).json({ success: false, message: 'Database connecting, please try again in a moment.' });
+  const connection = await db.getConnection();
   try {
-    const { locationId, issue, description, reportType } = reportSchema.parse(req.body);
+    await connection.beginTransaction();
+    
+    const parsedData = reportSchema.parse(req.body);
+    const { 
+      locationId, reporterName, issue, description, reportType,
+      department, classroomOffice, dateNeeded, workDescription, workDetails,
+      requestedBy, inspectedBy, conformedBy, workmanshipRating, materials: materialsStr
+    } = parsedData;
+
     const id = uuidv4();
     const trackingCode = generateTrackingCode();
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     const priority = getAutoPriority(issue, reportType);
     const slaDeadline = calculateSlaDeadline(priority);
 
-    await db.query(
-      'INSERT INTO reports (id, tracking_code, location_id, report_type, issue, description, image_url, priority, sla_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [id, trackingCode, locationId, reportType, issue, description, imageUrl, priority, slaDeadline]
+    await connection.query(
+      `INSERT INTO reports (
+        id, tracking_code, reporter_name, location_id, report_type, issue, description, 
+        image_url, priority, sla_deadline, department, classroom_office, date_needed, 
+        work_description, work_details, requested_by, inspected_by, conformed_by, workmanship_rating
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id, trackingCode, reporterName || null, locationId, reportType, issue, description, 
+        imageUrl, priority, slaDeadline, department || null, classroomOffice || null, 
+        dateNeeded || null, workDescription || null, workDetails || null, 
+        requestedBy || null, inspectedBy || null, conformedBy || null, workmanshipRating || null
+      ]
     );
 
+    // Handle Materials if provided
+    if (materialsStr) {
+      try {
+        const materials = JSON.parse(materialsStr);
+        if (Array.isArray(materials)) {
+          for (const m of materials) {
+            // Validate each material
+            const validM = materialSchema.parse(m);
+            await connection.query(
+              'INSERT INTO report_materials (report_id, material_name, material_source, qty_in, qty_used, qty_out) VALUES (?, ?, ?, ?, ?, ?)',
+              [id, validM.material_name, validM.material_source, validM.qty_in, validM.qty_used, validM.qty_out]
+            );
+          }
+        }
+      } catch (e) {
+        console.error('Error processing materials:', e.message);
+        // We don't necessarily want to fail the whole report if materials fail, 
+        // but since we are in a transaction and it's a new feature, let's be strict.
+        throw new Error('Invalid materials data: ' + e.message);
+      }
+    }
+
+    await connection.commit();
     io.emit('newReport', { id, trackingCode, locationId, issue, reportType, priority });
     res.status(201).json({ message: 'Report submitted successfully!', trackingCode });
-  } catch (err) { next(err); }
+  } catch (err) {
+    await connection.rollback();
+    next(err);
+  } finally {
+    connection.release();
+  }
 });
 
 // Get Reports (with pagination + role filtering)
@@ -217,9 +330,9 @@ app.get('/api/reports', authenticateToken, async (req, res, next) => {
     let whereClause = 'WHERE 1=1';
     const params = [];
 
-    // Technicians only see their assigned reports
+    // Technicians see their assigned reports OR all Pending reports
     if (req.user.role === 'Technician') {
-      whereClause += ' AND assigned_to = ?';
+      whereClause += ' AND (assigned_to = ? OR status = "Pending")';
       params.push(req.user.id);
     }
     if (statusFilter && statusFilter !== 'All') { whereClause += ' AND status = ?'; params.push(statusFilter); }
@@ -235,9 +348,111 @@ app.get('/api/reports', authenticateToken, async (req, res, next) => {
 // Track Report by Tracking Code (public)
 app.get('/api/reports/track/:trackingCode', async (req, res, next) => {
   try {
-    const [rows] = await db.query('SELECT tracking_code, location_id, report_type, issue, description, priority, status, created_at, resolved_at, admin_notes FROM reports WHERE tracking_code = ?', [req.params.trackingCode]);
+    const [rows] = await db.query(`
+      SELECT 
+        tracking_code, location_id, report_type, issue, description, 
+        priority, status, created_at, resolved_at, admin_notes,
+        department, classroom_office, date_needed, 
+        date_started, time_started, time_finished, date_completed,
+        work_description, requested_by, inspected_by, workmanship_rating
+      FROM reports WHERE tracking_code = ?`, [req.params.trackingCode]);
     if (rows.length === 0) return res.status(404).json({ message: 'Report not found. Check your tracking code.' });
     res.json(rows[0]);
+  } catch (err) { next(err); }
+});
+
+// Rate Workmanship (public via tracking code)
+app.post('/api/reports/track/:trackingCode/rate', async (req, res, next) => {
+  console.log(`[DEBUG] Rating request received for: ${req.params.trackingCode}`);
+  try {
+    const { trackingCode } = req.params;
+    const { rating } = req.body;
+
+    const validRatings = ['Outstanding', 'Very Satisfactory', 'Satisfactory', 'Unsatisfactory', 'Poor'];
+    if (!validRatings.includes(rating)) {
+      return res.status(400).json({ error: 'Invalid rating value.' });
+    }
+
+    const [rows] = await db.query('SELECT id, status FROM reports WHERE tracking_code = ?', [trackingCode]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Report not found.' });
+    if (rows[0].status !== 'Resolved') {
+      return res.status(400).json({ error: 'You can only rate resolved reports.' });
+    }
+
+    await db.query('UPDATE reports SET workmanship_rating = ? WHERE tracking_code = ?', [rating, trackingCode]);
+
+    // Notify admins of the new rating
+    const [updated] = await db.query('SELECT * FROM reports WHERE id = ?', [rows[0].id]);
+    io.emit('reportUpdated', updated[0]);
+
+    res.json({ message: 'Thank you for your feedback!' });
+  } catch (err) { next(err); }
+});
+
+// Get Report Materials
+app.get('/api/reports/:id/materials', authenticateToken, async (req, res, next) => {
+  try {
+    const [rows] = await db.query('SELECT * FROM report_materials WHERE report_id = ?', [req.params.id]);
+    res.json(rows);
+  } catch (err) { next(err); }
+});
+
+// Save Work Order Details (Technician/Admin)
+app.post('/api/reports/:id/work-order', authenticateToken, requireRole('Admin', 'Technician'), async (req, res, next) => {
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const { id } = req.params;
+    const data = workOrderSchema.parse(req.body);
+
+    await connection.query(
+      `UPDATE reports SET 
+        department = ?, classroom_office = ?, date_needed = ?, 
+        date_started = ?, time_started = ?, time_finished = ?, date_completed = ?,
+        work_description = ?, work_details = ?, requested_by = ?, 
+        inspected_by = ?, conformed_by = ?, workmanship_rating = ?
+      WHERE id = ?`,
+      [
+        data.department || null, data.classroomOffice || null, data.dateNeeded || null,
+        data.dateStarted || null, data.timeStarted || null, data.timeFinished || null, data.dateCompleted || null,
+        data.workDescription || null, data.workDetails || null, data.requestedBy || null,
+        data.inspectedBy || null, data.conformedBy || null, data.workmanshipRating || null,
+        id
+      ]
+    );
+
+    if (data.materials) {
+      // Refresh materials: delete old, insert new
+      await connection.query('DELETE FROM report_materials WHERE report_id = ?', [id]);
+      for (const m of data.materials) {
+        await connection.query(
+          'INSERT INTO report_materials (report_id, material_name, material_source, qty_in, qty_used, qty_out) VALUES (?, ?, ?, ?, ?, ?)',
+          [id, m.material_name, m.material_source, m.qty_in, m.qty_used, m.qty_out]
+        );
+      }
+    }
+
+    await connection.commit();
+    res.json({ message: 'Work order details saved successfully!' });
+  } catch (err) {
+    await connection.rollback();
+    next(err);
+  } finally {
+    connection.release();
+  }
+});
+
+// Approve or Reject Work Order (Admin Only)
+app.patch('/api/reports/:id/approval', authenticateToken, requireRole('Admin'), async (req, res, next) => {
+  try {
+    const { status } = req.body;
+    if (!['Approved', 'Rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+    await db.query('UPDATE reports SET approval_status = ? WHERE id = ?', [status, req.params.id]);
+    
+    io.emit('reportUpdated', { id: req.params.id, approval_status: status });
+    res.json({ message: `Work Order ${status} successfully!` });
   } catch (err) { next(err); }
 });
 
@@ -424,6 +639,7 @@ app.get('/api/technicians/stats', authenticateToken, requireRole('Admin'), async
 app.post('/api/reports/:id/scan', authenticateToken, requireRole('Admin'), async (req, res, next) => {
   try {
     const { id } = req.params;
+    console.log('[DEBUG] Scan request body:', req.body);
     const { qrToken } = req.body;
     if (!qrToken) return res.status(400).json({ error: 'Technician QR Token is required.' });
 
@@ -443,14 +659,14 @@ app.post('/api/reports/:id/scan', authenticateToken, requireRole('Admin'), async
 
     if (report.status === 'Pending') {
       newStatus = 'In Progress';
-      updates.push('status = ?', 'work_started_at = COALESCE(work_started_at, NOW())', 'assigned_to = ?');
+      updates.push('status = ?', 'work_started_at = COALESCE(work_started_at, NOW())', 'assigned_to = ?', 'date_started = CURDATE()', 'time_started = CURTIME()');
       params.push(newStatus, technician.id);
     } else if (report.status === 'In Progress') {
       if (report.assigned_to && report.assigned_to !== technician.id) {
         return res.status(403).json({ error: 'This report is assigned to a different technician.' });
       }
       newStatus = 'Resolved';
-      updates.push('status = ?', 'resolved_at = NOW()', 'work_completed_at = NOW()');
+      updates.push('status = ?', 'resolved_at = NOW()', 'work_completed_at = NOW()', 'date_completed = CURDATE()', 'time_finished = CURTIME()');
       params.push(newStatus);
     } else {
       return res.status(400).json({ error: `Report is already ${report.status}.` });

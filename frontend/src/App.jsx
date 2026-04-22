@@ -16,10 +16,9 @@ import { SOCKET_URL } from './utils/config';
 import { getUserId, getRole } from './models/authModel';
 import './App.css';
 
-const AdminLayout = ({ children, onLogout }) => {
+const AdminLayout = ({ children, onLogout, userRole, mobileOpen, setMobileOpen }) => {
   const location = useLocation();
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
     <>
@@ -35,9 +34,11 @@ const AdminLayout = ({ children, onLogout }) => {
             <Link to="/admin" className={`admin-sidebar-link ${location.pathname === '/admin' ? 'active' : ''}`} onClick={() => setMobileOpen(false)} title="Dashboard">
               <div className="icon-box-sm"><LayoutDashboard size={18} /></div> <span>Dashboard</span>
             </Link>
-            <Link to="/qr-gen" className={`admin-sidebar-link ${location.pathname === '/qr-gen' ? 'active' : ''}`} onClick={() => setMobileOpen(false)} title="QR Generator">
-              <div className="icon-box-sm icon-gold"><QrCode size={18} /></div> <span>QR Generator</span>
-            </Link>
+            {userRole === 'Admin' && (
+              <Link to="/qr-gen" className={`admin-sidebar-link ${location.pathname === '/qr-gen' ? 'active' : ''}`} onClick={() => setMobileOpen(false)} title="QR Generator">
+                <div className="icon-box-sm icon-gold"><QrCode size={18} /></div> <span>QR Generator</span>
+              </Link>
+            )}
             <button onClick={() => { onLogout(); setMobileOpen(false); }} className="admin-sidebar-link" title="Logout" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
               <div className="icon-box-sm icon-red"><LogOut size={18} /></div> <span>Logout</span>
             </button>
@@ -64,7 +65,7 @@ const PageWrapper = ({ children }) => (
   </motion.div>
 );
 
-const AnimatedRoutes = ({ isAuthenticated, onLogin, onLogout, addNotification }) => {
+const AnimatedRoutes = ({ isAuthenticated, onLogin, onLogout, addNotification, userRole, mobileOpen, setMobileOpen }) => {
   const location = useLocation();
   return (
     <AnimatePresence mode="wait">
@@ -75,11 +76,11 @@ const AnimatedRoutes = ({ isAuthenticated, onLogin, onLogout, addNotification })
         <Route path="/login" element={<PageWrapper><LoginPage onLogin={onLogin} /></PageWrapper>} />
         <Route
           path="/admin"
-          element={isAuthenticated ? (<AdminLayout onLogout={onLogout}><AdminDashboard addNotification={addNotification} /></AdminLayout>) : (<Navigate to="/login" />)}
+          element={isAuthenticated ? (<AdminLayout onLogout={onLogout} userRole={userRole} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen}><AdminDashboard addNotification={addNotification} /></AdminLayout>) : (<Navigate to="/login" />)}
         />
         <Route
           path="/qr-gen"
-          element={isAuthenticated ? (<AdminLayout onLogout={onLogout}><QRGenerator /></AdminLayout>) : (<Navigate to="/login" />)}
+          element={isAuthenticated && userRole === 'Admin' ? (<AdminLayout onLogout={onLogout} userRole={userRole} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen}><QRGenerator /></AdminLayout>) : (<Navigate to={isAuthenticated ? "/admin" : "/login"} />)}
         />
       </Routes>
     </AnimatePresence>
@@ -264,6 +265,9 @@ function App() {
           onLogin={setIsAuthenticated} 
           onLogout={handleLogout}
           addNotification={addNotification}
+          userRole={userRole}
+          mobileOpen={mobileMenuOpen}
+          setMobileOpen={setMobileMenuOpen}
         />
       </div>
     </Router>

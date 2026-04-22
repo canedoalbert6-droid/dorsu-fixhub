@@ -1,7 +1,7 @@
 // View: Admin dashboard — UI only, all logic via useAdminViewModel
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { RefreshCcw, List, BarChart3, FileText, Map as MapIcon, AlertCircle, Lightbulb, Trash2, MessageSquare, TrendingUp, AlertTriangle, Shield, Eye, Wrench, Search, X, Activity, UserPlus, MapPin, Camera, Clock, Users, Settings, Calendar, CheckCircle, QrCode, ScanLine, XCircle } from 'lucide-react';
+import { RefreshCcw, List, BarChart3, FileText, Map as MapIcon, AlertCircle, Lightbulb, Trash2, MessageSquare, TrendingUp, AlertTriangle, Shield, Eye, Wrench, Search, X, Activity, UserPlus, MapPin, Camera, Clock, Users, Settings, Calendar, CheckCircle, QrCode, ScanLine, XCircle, LayoutGrid, Send, User, Star } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { QRCodeSVG } from 'qrcode.react';
@@ -9,7 +9,7 @@ import { Html5QrcodeScanner } from 'html5-qrcode';
 import Analytics from './Analytics';
 import { useAdminViewModel } from '../viewmodels/useAdminViewModel';
 import { getPriorityColor, isSlaBreached, getAuthHeader } from '../models/reportModel';
-import { getQrToken } from '../models/authModel';
+import { getQrToken, getUserId } from '../models/authModel';
 import { API_URL, BASE_URL } from '../utils/config';
 import { formatTime, formatActivityTime, getGreeting } from '../utils/time';
 
@@ -37,6 +37,15 @@ const getRoleIcon = (role) => {
   return <Eye size={12} />;
 };
 
+const getStatusColor = (status) => {
+  switch (status) {
+    case 'Pending': return '#f59e0b'; // Amber
+    case 'In Progress': return '#2563eb'; // Blue
+    case 'Resolved': return '#16a34a'; // Green
+    default: return '#64748b'; // Slate
+  }
+};
+
 const AdminDashboard = ({ addNotification }) => {
   const {
     reports,
@@ -45,10 +54,12 @@ const AdminDashboard = ({ addNotification }) => {
     filterStatus, setFilterStatus,
     loading,
     activeTab, setActiveTab,
+    viewType, setViewType,
     editingNotes, setEditingNotes,
     comments,
     showComments, setShowComments,
     commentInput, setCommentInput,
+    materials,
     recurringIssues,
     userRole,
     pendingCount,
@@ -58,6 +69,12 @@ const AdminDashboard = ({ addNotification }) => {
     canEditReport,
     loadData,
     loadComments,
+    loadMaterials,
+    addMaterialRow,
+    removeMaterialRow,
+    updateMaterial,
+    handleSaveWorkOrder,
+    handleApproveWorkOrder,
     handleUpdate,
     handleDelete,
     handleAddComment,
@@ -67,11 +84,44 @@ const AdminDashboard = ({ addNotification }) => {
 
   const [activeScanReport, setActiveScanReport] = useState(null);
   const [showMyQR, setShowMyQR] = useState(false);
+  const [showWorkOrder, setShowWorkOrder] = useState(null); // stores report object
+  const [workOrderData, setWorkOrderData] = useState({});
+  const [zoomedImage, setZoomedImage] = useState(null);
   const scannerRef = useRef(null);
   const [isSecure] = useState(() => window.isSecureContext);
 
   const isAdmin = userRole === 'Admin';
   const isTechnician = userRole === 'Technician';
+
+  const openWorkOrder = (report) => {
+    setShowWorkOrder(report);
+    loadMaterials(report.id);
+    setWorkOrderData({
+      department: report.department || '',
+      classroomOffice: report.classroom_office || '',
+      dateNeeded: report.date_needed ? new Date(report.date_needed).toISOString().split('T')[0] : '',
+      dateStarted: report.date_started ? new Date(report.date_started).toISOString().split('T')[0] : '',
+      timeStarted: report.time_started || '',
+      timeFinished: report.time_finished || '',
+      dateCompleted: report.date_completed ? new Date(report.date_completed).toISOString().split('T')[0] : '',
+      workDescription: report.work_description || report.description || '', // Initialize with reporter description
+      workDetails: report.work_details || '',
+      requestedBy: report.requested_by || report.reporter_name || 'Anonymous', // Auto-fill Reporter
+      inspectedBy: report.inspected_by || localStorage.getItem('userName') || '', // Auto-fill Current User (Admin/Tech)
+      conformedBy: report.conformed_by || '',
+      workmanshipRating: report.workmanship_rating || '',
+    });
+  };
+
+  const saveWorkOrder = async () => {
+    await handleSaveWorkOrder(showWorkOrder.id, workOrderData);
+    setShowWorkOrder(null);
+  };
+
+  const approveWorkOrder = async (status) => {
+    await handleApproveWorkOrder(showWorkOrder.id, status);
+    setShowWorkOrder(null);
+  };
 
   useEffect(() => {
     let scanner = null;
@@ -329,19 +379,19 @@ const AdminDashboard = ({ addNotification }) => {
         </div>
         <div className="quick-stats">
           <div className="quick-stat animate-slide-up stagger-1">
-            <div className="quick-stat-value">{reports.length}</div>
+            <div className="quick-stat-value">{isTechnician ? filteredReports.length : reports.length}</div>
             <div className="quick-stat-label">{isTechnician ? 'My Reports' : 'Total Reports'}</div>
           </div>
           <div className="quick-stat animate-slide-up stagger-2">
-            <div className="quick-stat-value" style={{ color: '#f59e0b' }}>{pendingCount}</div>
+            <div className="quick-stat-value" style={{ color: '#f59e0b' }}>{isTechnician ? filteredReports.filter(r => r.status === 'Pending').length : pendingCount}</div>
             <div className="quick-stat-label">Pending</div>
           </div>
           <div className="quick-stat animate-slide-up stagger-3">
-            <div className="quick-stat-value" style={{ color: '#2563eb' }}>{reports.filter(r => r.status === 'In Progress').length}</div>
+            <div className="quick-stat-value" style={{ color: '#2563eb' }}>{filteredReports.filter(r => r.status === 'In Progress').length}</div>
             <div className="quick-stat-label">In Progress</div>
           </div>
           <div className="quick-stat animate-slide-up stagger-4">
-            <div className="quick-stat-value" style={{ color: '#16a34a' }}>{reports.filter(r => r.status === 'Resolved').length}</div>
+            <div className="quick-stat-value" style={{ color: '#16a34a' }}>{filteredReports.filter(r => r.status === 'Resolved').length}</div>
             <div className="quick-stat-label">Resolved</div>
           </div>
           {isAdmin && (
@@ -413,20 +463,36 @@ const AdminDashboard = ({ addNotification }) => {
       {activeTab === 'map' && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card">
           <h3 style={{ marginBottom: '1.5rem' }}>Visual Campus Health Monitor</h3>
-          <div className="building-map-grid">
-            {['BLDG-A-101', 'BLDG-B-LAB', 'CANTEEN', 'GYM'].map(loc => {
-              const health = buildingHealth.find(h => h.location_id === loc) || { pending_count: 0, breached_count: 0 };
-              const color = health.pending_count > 3 ? '#ef4444' : health.pending_count > 0 ? '#f59e0b' : '#10b981';
-              return (
-                <motion.div whileHover={{ scale: 1.05 }} key={loc} className="building-tile" style={{ borderTop: `6px solid ${color}` }}>
-                  <h4>{loc}</h4>
-                  <div className="health-stat">{health.pending_count} Issues</div>
-                  {health.breached_count > 0 && <div style={{ fontSize: '0.7rem', color: '#dc2626' }}>⚠️ {health.breached_count} SLA breached</div>}
-                  <div className="health-bar"><div style={{ width: `${Math.min(health.pending_count * 20, 100)}%`, background: color }}></div></div>
-                </motion.div>
-              );
-            })}
-          </div>
+          
+          {locations.length === 0 ? (
+            <EmptyState 
+              icon={MapIcon} 
+              title="No locations configured" 
+              description="Go to the 'Manage' tab to add campus buildings and offices to see them on the map."
+              action={isAdmin && <button className="btn-small" onClick={() => setActiveTab('manage')}>Configure Locations</button>}
+            />
+          ) : (
+            <div className="building-map-grid">
+              {locations.map(loc => {
+                const locId = loc.location_id;
+                const health = buildingHealth.find(h => h.location_id === locId) || { pending_count: 0, breached_count: 0 };
+                const color = health.pending_count > 3 ? '#ef4444' : health.pending_count > 0 ? '#f59e0b' : '#10b981';
+                return (
+                  <motion.div whileHover={{ scale: 1.05 }} key={locId} className="building-tile" style={{ borderTop: `6px solid ${color}` }}>
+                    <div>
+                      <h4>{loc.name || locId}</h4>
+                      <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{locId}</p>
+                    </div>
+                    <div>
+                      <div className="health-stat">{health.pending_count} Active Issues</div>
+                      {health.breached_count > 0 && <div style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 'bold' }}>⚠️ {health.breached_count} SLA breached</div>}
+                      <div className="health-bar"><div style={{ width: `${Math.min(health.pending_count * 20, 100)}%`, background: color }}></div></div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
         </motion.div>
       )}
 
@@ -524,7 +590,7 @@ const AdminDashboard = ({ addNotification }) => {
                       <span style={{ background: user.role === 'Admin' ? 'rgba(21, 128, 61, 0.1)' : user.role === 'Technician' ? 'rgba(37, 99, 235, 0.1)' : 'rgba(100, 116, 139, 0.1)', padding: '4px 10px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
                         {getRoleIcon(user.role)} {user.role}
                       </span>
-                      <button onClick={() => handleDeleteUser(user.id)} className="btn-small icon-red" style={{ padding: '6px', border: 'none', background: 'rgba(220, 38, 38, 0.1)', color: '#dc2626' }}><Trash2 size={14} /></button>
+                      <button onClick={() => handleDeleteUser(user.id)} className="btn-small" style={{ padding: '6px', border: 'none', background: 'rgba(220, 38, 38, 0.1)', color: '#dc2626' }}><Trash2 size={14} /></button>
                     </div>
                   </div>
                 ))}
@@ -560,7 +626,7 @@ const AdminDashboard = ({ addNotification }) => {
                       <strong style={{ fontSize: '0.9rem' }}>{loc.name}</strong>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{loc.location_id}</div>
                     </div>
-                    <button onClick={() => handleDeleteLocation(loc.location_id)} className="btn-small icon-red" style={{ padding: '6px', border: 'none', background: 'rgba(220, 38, 38, 0.1)', color: '#dc2626' }}><Trash2 size={14} /></button>
+                    <button onClick={() => handleDeleteLocation(loc.location_id)} className="btn-small" style={{ padding: '6px', border: 'none', background: 'rgba(220, 38, 38, 0.1)', color: '#dc2626' }}><Trash2 size={14} /></button>
                   </div>
                 ))}
               </div>
@@ -616,6 +682,7 @@ const AdminDashboard = ({ addNotification }) => {
                   exit={{ opacity: 0, scale: 0.95 }}
                   key={report.id}
                   className={`report-card card-hover-lift ${report.priority === 'Emergency' ? 'pulse-red' : ''} ${isSlaBreached(report) ? 'sla-breach-border' : ''}`}
+                  style={{ borderLeft: `6px solid ${getStatusColor(report.status)}` }}
                 >
                   <div className="report-top-meta">
                     <div className="type-tag">
@@ -649,15 +716,22 @@ const AdminDashboard = ({ addNotification }) => {
                     </div>
                   )}
 
+                  {/* Workmanship Rating Display (from User) */}
+                  {report.workmanship_rating && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '0.75rem', color: '#16a34a', fontWeight: '700' }}>
+                      <Star size={12} fill="#16a34a" /> Rating: {report.workmanship_rating}
+                    </div>
+                  )}
+
                   {report.image_url && (
-                    <div className="image-preview" style={{ marginTop: '1rem' }}>
+                    <div className="image-preview" style={{ marginTop: '1rem', cursor: 'zoom-in' }} onClick={() => setZoomedImage(`${BASE_URL}${report.image_url}`)}>
                       <img src={`${BASE_URL}${report.image_url}`} alt="issue" style={{ width: '100%', maxHeight: '150px', objectFit: 'cover', borderRadius: '8px' }} />
                     </div>
                   )}
 
                   {/* After-Fix Photo */}
                   {report.after_fix_image_url && (
-                    <div className="image-preview" style={{ marginTop: '8px', border: '2px solid #16a34a' }}>
+                    <div className="image-preview" style={{ marginTop: '8px', border: '2px solid #16a34a', cursor: 'zoom-in' }} onClick={() => setZoomedImage(`${BASE_URL}${report.after_fix_image_url}`)}>
                       <div style={{ background: '#16a34a', color: '#fff', padding: '4px 8px', fontSize: '0.7rem', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}><CheckCircle size={12} /> After Fix</div>
                       <img src={`${BASE_URL}${report.after_fix_image_url}`} alt="after fix" style={{ width: '100%', maxHeight: '150px', objectFit: 'cover', borderRadius: '0 0 8px 8px' }} />
                     </div>
@@ -684,7 +758,7 @@ const AdminDashboard = ({ addNotification }) => {
                     <div className="actions">
                       {/* Admin: Delete */}
                       {canDelete && (
-                        <button onClick={() => handleDeleteWithLog(report.id)} className="btn-small icon-red" style={{ padding: '8px', border: 'none', background: 'rgba(220, 38, 38, 0.1)', color: '#dc2626' }} title="Delete Permanent">
+                        <button onClick={() => handleDeleteWithLog(report.id)} className="btn-small" style={{ padding: '8px', border: 'none', background: 'rgba(220, 38, 38, 0.1)', color: '#dc2626' }} title="Delete Permanent">
                           <Trash2 size={16} />
                         </button>
                       )}
@@ -760,8 +834,29 @@ const AdminDashboard = ({ addNotification }) => {
                           {report.status !== 'Resolved' && (
                             <button onClick={() => setEditingNotes(report.id)} className="btn-small">Add Log</button>
                           )}
+                          
+                          {/* Work Order Button */}
+                          <button 
+                            onClick={() => openWorkOrder(report)} 
+                            className="btn-small" 
+                            style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6' }}
+                            title="Open Work Order Form"
+                          >
+                            <FileText size={14} /> Form
+                          </button>
+
                           {isAdmin ? (
-                            <select value={report.status} onChange={(e) => handleUpdateWithLog(report.id, e.target.value, report.admin_notes)} className="status-select">
+                            <select 
+                              value={report.status} 
+                              onChange={(e) => handleUpdateWithLog(report.id, e.target.value, report.admin_notes)} 
+                              className="status-select"
+                              style={{ 
+                                background: `${getStatusColor(report.status)}15`, 
+                                color: getStatusColor(report.status),
+                                borderColor: `${getStatusColor(report.status)}40`,
+                                fontWeight: '700'
+                              }}
+                            >
                               <option value="Pending">Pending</option>
                               <option value="In Progress">In Progress</option>
                               <option value="Resolved">Resolved</option>
@@ -772,9 +867,9 @@ const AdminDashboard = ({ addNotification }) => {
                               fontWeight: '700', 
                               padding: '6px 12px', 
                               borderRadius: '8px',
-                              background: 'var(--bg)',
-                              border: '1px solid var(--border)',
-                              color: 'var(--text-main)'
+                              background: `${getStatusColor(report.status)}15`,
+                              border: `1px solid ${getStatusColor(report.status)}40`,
+                              color: getStatusColor(report.status)
                             }}>
                               {report.status}
                             </span>
@@ -854,6 +949,191 @@ const AdminDashboard = ({ addNotification }) => {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Work Order Modal */}
+      <AnimatePresence>
+        {showWorkOrder && (
+          <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+            <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 20, opacity: 0 }} className="card work-order-modal" style={{ maxWidth: '900px', width: '100%', maxHeight: '90vh', overflowY: 'auto', position: 'relative' }}>
+              <button onClick={() => setShowWorkOrder(null)} style={{ position: 'absolute', right: '20px', top: '20px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={24} /></button>
+              
+              <div className="work-order-header">
+                <h2 className="work-order-title"><FileText size={28} /> PRE-REPAIR / POST-REPAIR WORK ORDER</h2>
+                <p className="work-order-subtitle">Tracking Code: <strong>{showWorkOrder.tracking_code || 'N/A'}</strong> | Status: <strong>{showWorkOrder.status}</strong></p>
+              </div>
+
+              <div className="work-order-grid-2">
+                <div className="form-group">
+                  <label>Department / Office</label>
+                  <input className="form-control" value={workOrderData.department} onChange={(e) => setWorkOrderData({...workOrderData, department: e.target.value})} placeholder="e.g. IT Department" />
+                </div>
+                <div className="form-group">
+                  <label>Classroom / Office No.</label>
+                  <input className="form-control" value={workOrderData.classroomOffice} onChange={(e) => setWorkOrderData({...workOrderData, classroomOffice: e.target.value})} placeholder="e.g. LAB 1" />
+                </div>
+                <div className="form-group">
+                  <label>Date Needed</label>
+                  <input type="date" className="form-control" value={workOrderData.dateNeeded} onChange={(e) => setWorkOrderData({...workOrderData, dateNeeded: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label>Date Started</label>
+                  <input type="date" className="form-control" value={workOrderData.dateStarted} onChange={(e) => setWorkOrderData({...workOrderData, dateStarted: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label>Time Started</label>
+                  <input type="time" className="form-control" value={workOrderData.timeStarted} onChange={(e) => setWorkOrderData({...workOrderData, timeStarted: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label>Time Finished</label>
+                  <input type="time" className="form-control" value={workOrderData.timeFinished} onChange={(e) => setWorkOrderData({...workOrderData, timeFinished: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label>Date Completed</label>
+                  <input type="date" className="form-control" value={workOrderData.dateCompleted} onChange={(e) => setWorkOrderData({...workOrderData, dateCompleted: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label>Approval Status</label>
+                  <div className="approval-status-box" style={{ padding: '10px', background: 'var(--bg)', borderRadius: '8px', fontWeight: '700', color: showWorkOrder.approval_status === 'Approved' ? '#16a34a' : showWorkOrder.approval_status === 'Rejected' ? '#dc2626' : '#ca8a04' }}>
+                    {showWorkOrder.approval_status || 'Pending'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="form-group mb-2">
+                <label>Nature of Work / Description</label>
+                <textarea className="form-control" style={{ minHeight: '80px' }} value={workOrderData.workDescription} onChange={(e) => setWorkOrderData({...workOrderData, workDescription: e.target.value})} placeholder="General description of the work..." />
+              </div>
+
+              <div className="form-group mb-2">
+                <label>Work Details / Actions Taken</label>
+                <textarea className="form-control" style={{ minHeight: '120px' }} value={workOrderData.workDetails} onChange={(e) => setWorkOrderData({...workOrderData, workDetails: e.target.value})} placeholder="List specific actions taken, parts replaced, etc..." />
+              </div>
+
+              <div className="mb-2">
+                <div className="section-header-row">
+                  <h3 className="section-title">Materials & Inventory Tracking</h3>
+                  <button onClick={() => addMaterialRow(showWorkOrder.id)} className="btn-small btn-add-material">+ Add Material</button>
+                </div>
+                <div className="responsive-table-wrapper">
+                  <table className="work-order-table">
+                    <thead>
+                      <tr>
+                        <th>Material Name</th>
+                        <th>Source</th>
+                        <th>Qty In</th>
+                        <th>Qty Used</th>
+                        <th>Qty Out</th>
+                        <th style={{ width: '40px' }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(materials[showWorkOrder.id] || []).map((m) => (
+                        <tr key={m.id || m.material_id}>
+                          <td><input className="table-input" value={m.material_name} onChange={(e) => updateMaterial(showWorkOrder.id, m.id || m.material_id, 'material_name', e.target.value)} /></td>
+                          <td>
+                            <select className="table-input" value={m.material_source} onChange={(e) => updateMaterial(showWorkOrder.id, m.id || m.material_id, 'material_source', e.target.value)}>
+                              <option value="stock">Stock</option>
+                              <option value="purchased">Purchased</option>
+                              <option value="donated">Donated</option>
+                            </select>
+                          </td>
+                          <td><input type="number" className="table-input" value={m.qty_in} onChange={(e) => updateMaterial(showWorkOrder.id, m.id || m.material_id, 'qty_in', e.target.value)} /></td>
+                          <td><input type="number" className="table-input" value={m.qty_used} onChange={(e) => updateMaterial(showWorkOrder.id, m.id || m.material_id, 'qty_used', e.target.value)} /></td>
+                          <td><input type="number" className="table-input" value={m.qty_out} onChange={(e) => updateMaterial(showWorkOrder.id, m.id || m.material_id, 'qty_out', e.target.value)} /></td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button onClick={() => removeMaterialRow(showWorkOrder.id, m.id || m.material_id)} className="btn-delete-row"><Trash2 size={16} /></button>
+                          </td>
+                        </tr>
+                      ))}
+                      {(materials[showWorkOrder.id] || []).length === 0 && (
+                        <tr><td colSpan="6" className="empty-table-msg">No materials added yet.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="work-order-grid-3">
+                <div className="form-group">
+                  <label>Requested By</label>
+                  <input className="form-control" value={workOrderData.requestedBy} onChange={(e) => setWorkOrderData({...workOrderData, requestedBy: e.target.value})} placeholder="Name of Requestor" />
+                </div>
+                <div className="form-group">
+                  <label>Inspected By</label>
+                  <input className="form-control" value={workOrderData.inspectedBy} onChange={(e) => setWorkOrderData({...workOrderData, inspectedBy: e.target.value})} placeholder="Name of Inspector" />
+                </div>
+                <div className="form-group">
+                  <label>Conformed By</label>
+                  <input className="form-control" value={workOrderData.conformedBy} onChange={(e) => setWorkOrderData({...workOrderData, conformedBy: e.target.value})} placeholder="End User Signature/Name" />
+                </div>
+              </div>
+
+              <div className="modal-footer-actions">
+                <button onClick={() => setShowWorkOrder(null)} className="btn-small modal-btn">Cancel</button>
+                {isAdmin && showWorkOrder.approval_status !== 'Approved' && (
+                  <button onClick={() => approveWorkOrder('Approved')} className="btn-small modal-btn btn-approve">Approve Order</button>
+                )}
+                {isAdmin && showWorkOrder.approval_status !== 'Rejected' && (
+                  <button onClick={() => approveWorkOrder('Rejected')} className="btn-small modal-btn btn-reject">Reject Order</button>
+                )}
+                <button onClick={saveWorkOrder} className="btn-primary modal-btn-save">Save Work Order</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Image Zoom Modal */}
+      <AnimatePresence>
+        {zoomedImage && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setZoomedImage(null)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.9)',
+              zIndex: 2000,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '40px',
+              cursor: 'zoom-out'
+            }}
+          >
+            <motion.img
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.9 }}
+              src={zoomedImage}
+              style={{
+                maxWidth: '100%',
+                maxHeight: '100%',
+                borderRadius: '12px',
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)'
+              }}
+            />
+            <button
+              onClick={() => setZoomedImage(null)}
+              style={{
+                position: 'absolute',
+                top: '20px',
+                right: '20px',
+                background: 'rgba(255,255,255,0.1)',
+                border: 'none',
+                color: '#fff',
+                padding: '10px',
+                borderRadius: '50%',
+                cursor: 'pointer'
+              }}
+            >
+              <X size={24} />
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

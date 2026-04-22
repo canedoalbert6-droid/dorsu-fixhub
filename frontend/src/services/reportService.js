@@ -14,6 +14,29 @@ export const fetchReports = async ({ page = 1, limit = 100, status, type } = {})
   return res.data;
 };
 
+export const fetchReportMaterials = async (id) => {
+  const res = await axios.get(`${API_URL}/reports/${id}/materials`, {
+    headers: getAuthHeader(),
+  });
+  return res.data;
+};
+
+export const saveWorkOrder = async (id, data) => {
+  const res = await axios.post(`${API_URL}/reports/${id}/work-order`, data, {
+    headers: getAuthHeader(),
+  });
+  return res.data;
+};
+
+export const updateWorkOrderApproval = async (id, status) => {
+  const res = await axios.patch(
+    `${API_URL}/reports/${id}/approval`,
+    { status },
+    { headers: getAuthHeader() }
+  );
+  return res.data;
+};
+
 export const submitReport = async (formData) => {
   const res = await axios.post(`${API_URL}/reports`, formData);
   return res.data;
@@ -21,6 +44,11 @@ export const submitReport = async (formData) => {
 
 export const trackReport = async (trackingCode) => {
   const res = await axios.get(`${API_URL}/reports/track/${trackingCode}`);
+  return res.data;
+};
+
+export const rateWorkmanship = async (trackingCode, rating) => {
+  const res = await axios.post(`${API_URL}/reports/track/${trackingCode}/rate`, { rating });
   return res.data;
 };
 
@@ -71,7 +99,7 @@ export const unassignReport = async (reportId) => {
 
 export const scanTechnicianQR = async (reportId, qrToken) => {
   const res = await axios.post(`${API_URL}/reports/${reportId}/scan`, { qrToken }, {
-    headers: getAuthHeader()
+    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }
   });
   return res.data;
 };

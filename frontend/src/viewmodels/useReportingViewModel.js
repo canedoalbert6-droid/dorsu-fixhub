@@ -1,4 +1,4 @@
-// ViewModel: Report submission form
+// ViewModel: Report submission form — Simple version for public use
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -9,7 +9,7 @@ import { submitReport, saveOfflineReport, syncOfflineReports, getOfflineReports 
 import { REPORT_TYPE } from '../models/reportModel';
 
 /**
- * Manages the full report submission form lifecycle.
+ * Manages the simple report submission form lifecycle.
  * Used by ReportingPage.jsx.
  */
 export const useReportingViewModel = () => {
@@ -18,6 +18,7 @@ export const useReportingViewModel = () => {
 
   const [locationName, setLocationName] = useState('Loading location...');
   const [reportType, setReportType] = useState(REPORT_TYPE.MAINTENANCE);
+  const [reporterName, setReporterName] = useState('');
   const [issue, setIssue] = useState('');
   const [description, setDescription] = useState('');
   const [image, setImage] = useState(null);
@@ -36,7 +37,6 @@ export const useReportingViewModel = () => {
     }
   }, []);
 
-  // Online/offline event listeners
   useEffect(() => {
     const handleOnline = () => { setIsOnline(true); syncPending(); };
     const handleOffline = () => setIsOnline(false);
@@ -48,7 +48,6 @@ export const useReportingViewModel = () => {
     };
   }, [syncPending]);
 
-  // Fetch location name and recent reports
   useEffect(() => {
     if (!isOnline) return;
     fetchLocation(locationId)
@@ -77,6 +76,7 @@ export const useReportingViewModel = () => {
 
     const formData = new FormData();
     formData.append('locationId', locationId);
+    formData.append('reporterName', reporterName);
     formData.append('reportType', reportType);
     formData.append('issue', issue);
     formData.append('description', description);
@@ -107,6 +107,8 @@ export const useReportingViewModel = () => {
     locationName,
     reportType,
     setReportType,
+    reporterName,
+    setReporterName,
     issue,
     setIssue,
     description,

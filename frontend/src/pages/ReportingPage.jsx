@@ -1,14 +1,17 @@
-// View: Report submission — UI only, logic via useReportingViewModel
-import React from 'react';
+// View: Simple Report submission for the public
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Camera, Send, CheckCircle, Lightbulb, Wrench, WifiOff } from 'lucide-react';
+import { Camera, Send, CheckCircle, Lightbulb, Wrench, WifiOff, Copy, ExternalLink, AlertTriangle, AlertCircle } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useReportingViewModel } from '../viewmodels/useReportingViewModel';
 import { REPORT_TYPE, MAINTENANCE_ISSUES, INNOVATION_ISSUES } from '../models/reportModel';
+import toast from 'react-hot-toast';
 
 const ReportingPage = () => {
   const {
     locationName,
     reportType, setReportType,
+    reporterName, setReporterName,
     issue, setIssue,
     description, setDescription,
     image,
@@ -21,25 +24,54 @@ const ReportingPage = () => {
     handleSubmit,
   } = useReportingViewModel();
 
+  const copyToClipboard = () => {
+    if (trackingCode) {
+      navigator.clipboard.writeText(trackingCode);
+      toast.success('Tracking code copied!');
+    }
+  };
+
   if (submitted) {
     return (
-      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="card text-center success-message">
-        <CheckCircle size={60} color="var(--primary)" />
-        <h2 style={{ color: 'var(--primary)', marginTop: '1rem' }}>Success!</h2>
-        <p>Your {reportType.toLowerCase()} entry has been logged for {locationName}.</p>
+      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="card text-center success-card">
+        <div className="icon-box-lg success-icon-wrapper">
+          <CheckCircle size={48} />
+        </div>
+        <h2 className="success-title">Submission Received!</h2>
+        <p className="success-desc">Your {reportType.toLowerCase()} entry has been logged for <strong>{locationName}</strong>.</p>
+        
         {trackingCode && (
-          <div style={{ background: 'rgba(21, 128, 61, 0.1)', padding: '12px 20px', borderRadius: '12px', margin: '1rem 0', display: 'inline-block' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Tracking Code:</span>
-            <div style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--primary)', letterSpacing: '2px' }}>{trackingCode}</div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Save this to check your report status</span>
+          <div className="tracking-id-container">
+            <div className="tracking-reminder-header">
+              <AlertTriangle size={16} /> IMPORTANT REMINDER
+            </div>
+            <p className="tracking-instruction">Please <strong>Save or Screenshot</strong> this Tracking ID. This is your only way to check the progress of your report.</p>
+            
+            <div className="tracking-id-box">
+              <span className="tracking-id-value">{trackingCode}</span>
+              <button onClick={copyToClipboard} className="btn-copy" title="Copy to clipboard">
+                <Copy size={18} />
+              </button>
+            </div>
+
+            <div className="tracking-link-wrapper">
+              <Link to="/track" className="tracking-link hover-underline">
+                <ExternalLink size={16} /> Go to Tracking Page
+              </Link>
+            </div>
           </div>
         )}
+
         {pendingCount > 0 && (
-          <div style={{ fontSize: '0.8rem', color: '#f59e0b', marginTop: '0.5rem' }}>
-            {pendingCount} report(s) queued for sync
+          <div className="offline-sync-badge">
+            <WifiOff size={14} /> {pendingCount} report(s) will be synced when you go online.
           </div>
         )}
-        <button onClick={() => window.location.reload()} className="btn-primary" style={{ margin: '1rem auto' }}>Finish</button>
+        
+        <div className="success-actions">
+          <button onClick={() => window.location.reload()} className="btn-primary success-btn">Submit Another</button>
+          <Link to="/" className="btn-small success-btn-alt">Back to Home</Link>
+        </div>
       </motion.div>
     );
   }
@@ -54,14 +86,8 @@ const ReportingPage = () => {
             <WifiOff size={14} /> Offline Mode — Reports will sync later
           </div>
         )}
-        {pendingCount > 0 && (
-          <div style={{ fontSize: '0.75rem', color: '#f59e0b', marginTop: '4px' }}>
-            {pendingCount} pending offline
-          </div>
-        )}
       </div>
 
-      {/* Report Type Toggle */}
       <div style={{ display: 'flex', background: 'var(--bg)', padding: '8px', borderRadius: '16px', marginBottom: '2rem', border: '1px solid var(--border)' }}>
         <button
           onClick={() => setReportType(REPORT_TYPE.MAINTENANCE)}
@@ -85,6 +111,18 @@ const ReportingPage = () => {
 
       <form onSubmit={handleSubmit}>
         <div className="form-group">
+          <label>Your Name <span style={{ color: 'var(--text-muted)', fontWeight: '400', fontSize: '0.8rem' }}>(optional)</span></label>
+          <input
+            type="text"
+            className="form-control"
+            placeholder="e.g. Juan Dela Cruz"
+            value={reporterName}
+            onChange={(e) => setReporterName(e.target.value)}
+            maxLength={100}
+          />
+        </div>
+
+        <div className="form-group">
           <label>{reportType === REPORT_TYPE.MAINTENANCE ? 'Issue Category' : 'Innovation Area'}</label>
           <select value={issue} onChange={(e) => setIssue(e.target.value)} required className="form-control">
             <option value="">Select...</option>
@@ -107,9 +145,16 @@ const ReportingPage = () => {
           {image && <div style={{ marginTop: '10px', fontSize: '0.8rem', color: 'var(--primary)', fontWeight: '700' }}>✅ {image.name}</div>}
         </div>
 
-        <button type="submit" disabled={loading} className="btn-primary full-width" style={{ background: reportType === REPORT_TYPE.INNOVATION ? 'var(--secondary)' : 'var(--primary)' }}>
+        <button type="submit" disabled={loading} className="btn-primary full-width" style={{ background: reportType === REPORT_TYPE.INNOVATION ? 'var(--secondary)' : 'var(--primary)', marginBottom: '1.5rem' }}>
           {loading ? 'Processing...' : <><Send size={18} /> {reportType === REPORT_TYPE.MAINTENANCE ? 'Send Report' : 'Submit Idea'}</>}
         </button>
+
+        <div style={{ background: 'rgba(59, 130, 246, 0.05)', padding: '15px', borderRadius: '12px', border: '1px solid rgba(59, 130, 246, 0.1)', display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+          <AlertCircle size={20} color="#3b82f6" style={{ marginTop: '2px', flexShrink: 0 }} />
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: '1.4', margin: 0 }}>
+            <strong>Note:</strong> After submission, you will receive a unique <strong>Tracking ID</strong>. Please save it to monitor the progress of your repair or innovation suggestion.
+          </p>
+        </div>
       </form>
     </motion.div>
   );
