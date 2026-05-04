@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS report_materials (
     id INT AUTO_INCREMENT PRIMARY KEY,
     report_id CHAR(36),
     material_name VARCHAR(255),
-    material_source ENUM('stock', 'petty cash', 'procurement'),
+    material_source ENUM('stock', 'purchased', 'donated'),
     qty_in INT DEFAULT 0,
     qty_used INT DEFAULT 0,
     qty_out INT DEFAULT 0,

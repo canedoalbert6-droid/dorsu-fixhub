@@ -1,7 +1,7 @@
 // View: Report tracking — UI only, logic via useTrackingViewModel
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Search, Clock, CheckCircle, AlertCircle, MapPin, Lightbulb, Wrench, Star } from 'lucide-react';
+import { Search, Clock, CheckCircle, AlertCircle, MapPin, Lightbulb, Wrench, Star, User } from 'lucide-react';
 import { useTrackingViewModel } from '../viewmodels/useTrackingViewModel';
 import { PRIORITY_COLORS } from '../models/reportModel';
 
@@ -65,6 +65,13 @@ const TrackingPage = () => {
               {report.report_type === 'Innovation' ? <Lightbulb size={16} color="var(--secondary)" /> : <Wrench size={16} color="var(--primary)" />}
               <span>{report.report_type}: {report.issue}</span>
             </div>
+
+            {report.assigned_name && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--primary)', fontWeight: '600', fontSize: '0.85rem', background: 'rgba(16, 185, 129, 0.05)', padding: '8px 12px', borderRadius: '8px' }}>
+                <User size={14} /> Assigned Technician: {report.assigned_name}
+              </div>
+            )}
+
             <div style={{ background: '#fff', padding: '12px', borderRadius: '8px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
               {report.description}
             </div>

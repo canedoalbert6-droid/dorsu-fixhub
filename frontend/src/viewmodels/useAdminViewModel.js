@@ -234,8 +234,13 @@ export const useAdminViewModel = (addNotification) => {
   };
 
   const handleScan = useCallback(async (reportId, qrToken) => {
+    const token = (qrToken || '').trim();
+    if (!token) {
+      toast.error('Scanned QR code is empty.');
+      return false;
+    }
     try {
-      const res = await scanTechnicianQR(reportId, qrToken);
+      const res = await scanTechnicianQR(reportId, token);
       toast.success(res.message);
       loadData();
       return true;
@@ -261,11 +266,23 @@ export const useAdminViewModel = (addNotification) => {
     toast.success('Preparing PDF...');
     const doc = new jsPDF();
     const tableColumn = ['Type', 'Location', 'Issue', 'Priority', 'Status'];
-    const tableRows = filteredReports.map(r => [r.report_type, r.location_id, r.issue, r.priority, r.status]);
+    const tableRows = filteredReports.map(r => [
+      r.report_type || 'N/A', 
+      r.location_id || 'N/A', 
+      r.issue || 'N/A', 
+      r.priority || 'N/A', 
+      r.status || 'N/A'
+    ]);
     doc.setFontSize(18);
-    doc.setTextColor(21, 128, 61);
+    doc.setTextColor(16, 185, 129); // Emerald 500
     doc.text('DOrSU FixHub Management Summary', 14, 20);
-    doc.autoTable({ head: [tableColumn], body: tableRows, startY: 30, theme: 'striped', headStyles: { fillColor: [21, 128, 61] } });
+    doc.autoTable({ 
+      head: [tableColumn], 
+      body: tableRows, 
+      startY: 30, 
+      theme: 'grid', 
+      headStyles: { fillColor: [16, 185, 129] } 
+    });
     doc.save(`DOrSU-Summary-${Date.now()}.pdf`);
   };
 

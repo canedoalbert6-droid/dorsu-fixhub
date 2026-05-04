@@ -339,7 +339,15 @@ app.get('/api/reports', authenticateToken, async (req, res, next) => {
     if (typeFilter) { whereClause += ' AND report_type = ?'; params.push(typeFilter); }
 
     const [countRows] = await db.query(`SELECT COUNT(*) as total FROM reports ${whereClause}`, params);
-    const [rows] = await db.query(`SELECT r.*, a.full_name as assigned_name FROM reports r LEFT JOIN admins a ON r.assigned_to = a.id ${whereClause} ORDER BY r.created_at DESC LIMIT ? OFFSET ?`, [...params, limit, offset]);
+    const [rows] = await db.query(`
+      SELECT r.*, a.full_name as assigned_name,
+        CAST((SELECT COUNT(*) FROM reports WHERE assigned_to = r.assigned_to AND status = 'In Progress') AS UNSIGNED) as assigned_active_tasks
+      FROM reports r 
+      LEFT JOIN admins a ON r.assigned_to = a.id 
+      ${whereClause} 
+      ORDER BY r.created_at DESC 
+      LIMIT ? OFFSET ?
+    `, [...params, limit, offset]);
 
     res.json({ data: rows, total: countRows[0].total, page, limit, totalPages: Math.ceil(countRows[0].total / limit) });
   } catch (err) { next(err); }
@@ -350,12 +358,15 @@ app.get('/api/reports/track/:trackingCode', async (req, res, next) => {
   try {
     const [rows] = await db.query(`
       SELECT 
-        tracking_code, location_id, report_type, issue, description, 
-        priority, status, created_at, resolved_at, admin_notes,
-        department, classroom_office, date_needed, 
-        date_started, time_started, time_finished, date_completed,
-        work_description, requested_by, inspected_by, workmanship_rating
-      FROM reports WHERE tracking_code = ?`, [req.params.trackingCode]);
+        r.tracking_code, r.location_id, r.report_type, r.issue, r.description, 
+        r.priority, r.status, r.created_at, r.resolved_at, r.admin_notes,
+        r.department, r.classroom_office, r.date_needed, 
+        r.date_started, r.time_started, r.time_finished, r.date_completed,
+        r.work_description, r.requested_by, r.inspected_by, r.workmanship_rating,
+        a.full_name as assigned_name
+      FROM reports r
+      LEFT JOIN admins a ON r.assigned_to = a.id
+      WHERE r.tracking_code = ?`, [req.params.trackingCode]);
     if (rows.length === 0) return res.status(404).json({ message: 'Report not found. Check your tracking code.' });
     res.json(rows[0]);
   } catch (err) { next(err); }
@@ -401,8 +412,17 @@ app.get('/api/reports/:id/materials', authenticateToken, async (req, res, next) 
 app.post('/api/reports/:id/work-order', authenticateToken, requireRole('Admin', 'Technician'), async (req, res, next) => {
   const connection = await db.getConnection();
   try {
-    await connection.beginTransaction();
     const { id } = req.params;
+    const { id: userId, role: userRole } = req.user;
+
+    // Security Check: Only Admin or Assigned Technician
+    const [reportRows] = await connection.query('SELECT assigned_to FROM reports WHERE id = ?', [id]);
+    if (reportRows.length === 0) return res.status(404).json({ error: 'Report not found.' });
+    if (userRole !== 'Admin' && reportRows[0].assigned_to !== userId) {
+      return res.status(403).json({ error: 'Access Denied: You are not assigned to this report.' });
+    }
+
+    await connection.beginTransaction();
     const data = workOrderSchema.parse(req.body);
 
     await connection.query(
@@ -606,7 +626,13 @@ app.patch('/api/reports/:id/sla', authenticateToken, requireRole('Admin'), async
 // Get Technicians List (Admin Only)
 app.get('/api/technicians', authenticateToken, requireRole('Admin'), async (req, res, next) => {
   try {
-    const [rows] = await db.query('SELECT id, username, full_name, role FROM admins WHERE role IN ("Technician", "Admin") ORDER BY full_name');
+    const [rows] = await db.query(`
+      SELECT a.id, a.username, a.full_name, a.role,
+        CAST((SELECT COUNT(*) FROM reports WHERE assigned_to = a.id AND status = 'In Progress') AS UNSIGNED) as active_tasks
+      FROM admins a 
+      WHERE a.role IN ("Technician", "Admin") 
+      ORDER BY full_name
+    `);
     res.json(rows);
   } catch (err) { next(err); }
 });
@@ -639,13 +665,20 @@ app.get('/api/technicians/stats', authenticateToken, requireRole('Admin'), async
 app.post('/api/reports/:id/scan', authenticateToken, requireRole('Admin'), async (req, res, next) => {
   try {
     const { id } = req.params;
-    console.log('[DEBUG] Scan request body:', req.body);
-    const { qrToken } = req.body;
-    if (!qrToken) return res.status(400).json({ error: 'Technician QR Token is required.' });
+    console.log(`[DEBUG] Scan request for report ${id}. Body:`, req.body);
+    
+    const qrToken = req.body.qrToken?.trim();
+    if (!qrToken) {
+      console.warn(`[SCAN ERROR] Missing qrToken in request for report ${id}`);
+      return res.status(400).json({ error: 'Technician QR Token is required.' });
+    }
 
     // 1. Find technician by qrToken
     const [techs] = await db.query('SELECT id, full_name FROM admins WHERE qr_token = ? AND role IN ("Technician", "Admin")', [qrToken]);
-    if (techs.length === 0) return res.status(404).json({ error: 'Invalid Technician QR Code.' });
+    if (techs.length === 0) {
+      console.warn(`[SCAN ERROR] Invalid QR token scanned: ${qrToken}`);
+      return res.status(404).json({ error: 'Invalid Technician QR Code.' });
+    }
     const technician = techs[0];
 
     // 2. Get current report status
@@ -810,6 +843,19 @@ app.get('/api/public/status', async (req, res, next) => {
 
 // Error handling middleware (must be last)
 app.use(errorHandler);
+
+// Serve Frontend Static Files (from the dist folder)
+const frontendPath = path.join(__dirname, '../frontend/dist');
+app.use(express.static(frontendPath));
+
+// Catch-all route to serve the React index.html for any non-API routes
+app.use((req, res, next) => {
+  if (req.method === 'GET' && !req.path.startsWith('/api/')) {
+    res.sendFile(path.join(frontendPath, 'index.html'));
+  } else {
+    next();
+  }
+});
 
 const os = require('os');
 const getNetworkIP = () => {
