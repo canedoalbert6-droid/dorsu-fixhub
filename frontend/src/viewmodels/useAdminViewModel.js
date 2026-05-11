@@ -21,6 +21,10 @@ import {
   fetchReportMaterials,
   saveWorkOrder,
   updateWorkOrderApproval,
+  fetchEquipment,
+  fetchReportEquipment,
+  scanEquipmentToReport,
+  autoAssignReports,
 } from '../services/reportService';
 
 /**
@@ -42,6 +46,8 @@ export const useAdminViewModel = (addNotification) => {
   const [showMaterials, setShowMaterials] = useState(null);
   const [recurringIssues, setRecurringIssues] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [equipment, setEquipment] = useState([]);
+  const [reportEquipment, setReportEquipment] = useState({});
   const [userRole] = useState(() => getRole());
   const [showOnlyMine, setShowOnlyMine] = useState(userRole === 'Technician');
   const [pendingCount, setPendingCount] = useState(0);
@@ -64,6 +70,8 @@ export const useAdminViewModel = (addNotification) => {
       if (userRole === 'Admin' || userRole === 'Technician') {
         const locData = await fetchLocations().catch(() => []);
         setLocations(locData);
+        const equipData = await fetchEquipment().catch(() => []);
+        setEquipment(equipData);
       }
     } catch (err) {
       console.error('[loadData Error]', err);
@@ -94,6 +102,15 @@ export const useAdminViewModel = (addNotification) => {
       setMaterials(prev => ({ ...prev, [reportId]: data }));
     } catch {
       setMaterials(prev => ({ ...prev, [reportId]: [] }));
+    }
+  }, []);
+
+  const loadReportEquipment = useCallback(async (reportId) => {
+    try {
+      const data = await fetchReportEquipment(reportId);
+      setReportEquipment(prev => ({ ...prev, [reportId]: data }));
+    } catch {
+      setReportEquipment(prev => ({ ...prev, [reportId]: [] }));
     }
   }, []);
 
@@ -128,6 +145,15 @@ export const useAdminViewModel = (addNotification) => {
     });
     socket.on('commentsUpdated', (data) => {
       setComments(prev => ({ ...prev, [data.reportId]: data.comments }));
+    });
+
+    socket.on('workOrderSubmitted', (data) => {
+      loadData();
+      if (getRole() === 'Admin') {
+        const techName = data.report?.assigned_name || 'A technician';
+        const issue = data.report?.issue || 'a report';
+        toast.success(`📋 ${techName} submitted a work order for: ${issue}`, { duration: 5000 });
+      }
     });
 
     return () => socket.disconnect();
@@ -168,6 +194,18 @@ export const useAdminViewModel = (addNotification) => {
       toast.success('Deleted successfully', { id: loadingToast });
     } catch {
       toast.error('Delete failed', { id: loadingToast });
+    }
+  };
+
+  const handleAutoAssign = async () => {
+    if (!window.confirm('Automatically assign all unassigned pending reports to technicians based on workload?')) return;
+    const loadingToast = toast.loading('Running Smart Assignment...');
+    try {
+      const res = await autoAssignReports();
+      toast.success(res.message, { id: loadingToast });
+      loadData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Auto-assignment failed.', { id: loadingToast });
     }
   };
 
@@ -250,6 +288,25 @@ export const useAdminViewModel = (addNotification) => {
     }
   }, [loadData]);
 
+  const handleScanEquipment = useCallback(async (reportId, qrToken) => {
+    const token = (qrToken || '').trim();
+    if (!token) {
+      toast.error('Scanned QR code is empty.');
+      return false;
+    }
+    try {
+      const res = await scanEquipmentToReport(reportId, token);
+      toast.success(res.message);
+      loadReportEquipment(reportId);
+      const equipData = await fetchEquipment().catch(() => []);
+      setEquipment(equipData);
+      return true;
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Scan failed.');
+      return false;
+    }
+  }, [loadReportEquipment]);
+
   const handleAfterFixPhoto = async (reportId, file) => {
     if (!file) return;
     const loadingToast = toast.loading('Uploading photo...');
@@ -329,6 +386,8 @@ export const useAdminViewModel = (addNotification) => {
     recurringIssues,
     locations,
     setLocations,
+    equipment,
+    reportEquipment,
     userRole,
     showOnlyMine,
     setShowOnlyMine,
@@ -340,6 +399,7 @@ export const useAdminViewModel = (addNotification) => {
     loadData,
     loadComments,
     loadMaterials,
+    loadReportEquipment,
     addMaterialRow,
     removeMaterialRow,
     updateMaterial,
@@ -347,9 +407,11 @@ export const useAdminViewModel = (addNotification) => {
     handleApproveWorkOrder,
     handleUpdate,
     handleDelete,
+    handleAutoAssign,
     handleAddComment,
     handleAfterFixPhoto,
     handleScan,
+    handleScanEquipment,
     generatePDF,
   };
 };

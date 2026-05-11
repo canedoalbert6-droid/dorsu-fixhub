@@ -209,33 +209,6 @@ io.on('connection', (socket) => {
 
 // --- API ENDPOINTS ---
 
-// Rate Workmanship (public via tracking code)
-app.post('/api/reports/track/:trackingCode/rate', async (req, res, next) => {
-  console.log(`[DEBUG] Rating request received for: ${req.params.trackingCode}`);
-  try {
-    const { trackingCode } = req.params;
-    const { rating } = req.body;
-    
-    const validRatings = ['Outstanding', 'Very Satisfactory', 'Satisfactory', 'Unsatisfactory', 'Poor'];
-    if (!validRatings.includes(rating)) {
-      return res.status(400).json({ error: 'Invalid rating value.' });
-    }
-
-    const [rows] = await db.query('SELECT id, status FROM reports WHERE tracking_code = ?', [trackingCode]);
-    if (rows.length === 0) return res.status(404).json({ error: 'Report not found.' });
-    if (rows[0].status !== 'Resolved') {
-      return res.status(400).json({ error: 'You can only rate resolved reports.' });
-    }
-
-    await db.query('UPDATE reports SET workmanship_rating = ? WHERE tracking_code = ?', [rating, trackingCode]);
-    
-    // Notify admins of the new rating
-    const [updated] = await db.query('SELECT * FROM reports WHERE id = ?', [rows[0].id]);
-    io.emit('reportUpdated', updated[0]);
-
-    res.json({ message: 'Thank you for your feedback!' });
-  } catch (err) { next(err); }
-});
 
 // Login
 app.post('/api/login', async (req, res, next) => {
@@ -453,6 +426,18 @@ app.post('/api/reports/:id/work-order', authenticateToken, requireRole('Admin', 
     }
 
     await connection.commit();
+
+    // Fetch updated report to broadcast to admins
+    const [updated] = await db.query(
+      `SELECT r.*, a.full_name as assigned_name 
+       FROM reports r LEFT JOIN admins a ON r.assigned_to = a.id 
+       WHERE r.id = ?`, [id]
+    );
+    io.emit('workOrderSubmitted', {
+      report: updated[0],
+      submittedBy: { id: userId, role: userRole },
+    });
+
     res.json({ message: 'Work order details saved successfully!' });
   } catch (err) {
     await connection.rollback();
@@ -657,6 +642,47 @@ app.get('/api/technicians/stats', authenticateToken, requireRole('Admin'), async
   } catch (err) { next(err); }
 });
 
+// Smart Auto-Assign Reports (Admin Only)
+app.post('/api/reports/auto-assign', authenticateToken, requireRole('Admin'), async (req, res, next) => {
+  try {
+    // 1. Get all Pending reports that aren't assigned
+    const [pendingReports] = await db.query('SELECT id, priority, issue FROM reports WHERE status = "Pending" AND assigned_to IS NULL ORDER BY created_at ASC');
+    if (pendingReports.length === 0) return res.json({ message: 'No pending reports to assign.', assignedCount: 0 });
+
+    // 2. Get all technicians and their current workloads
+    const [technicians] = await db.query(`
+      SELECT a.id, a.full_name,
+        CAST((SELECT COUNT(*) FROM reports WHERE assigned_to = a.id AND status = 'In Progress') AS UNSIGNED) as active_tasks,
+        CAST((SELECT COUNT(*) FROM reports WHERE assigned_to = a.id AND status != 'Resolved' AND sla_breached = 1) AS UNSIGNED) as breached_tasks
+      FROM admins a 
+      WHERE a.role = 'Technician'
+    `);
+
+    if (technicians.length === 0) return res.status(400).json({ error: 'No technicians available to assign.' });
+
+    // 3. Weighted Least Connection Algorithm
+    // Workload Score = ActiveTasks * 1.0 + BreachedTasks * 2.0
+    const techPool = technicians.map(t => ({
+      ...t,
+      score: (Number(t.active_tasks) * 1.0) + (Number(t.breached_tasks) * 2.0)
+    })).sort((a, b) => a.score - b.score);
+
+    let assignedCount = 0;
+    for (const report of pendingReports) {
+      const bestTech = techPool[0];
+      await db.query('UPDATE reports SET assigned_to = ? WHERE id = ?', [bestTech.id, report.id]);
+      
+      bestTech.active_tasks++;
+      bestTech.score += 1.0;
+      techPool.sort((a, b) => a.score - b.score);
+      assignedCount++;
+    }
+
+    io.emit('reportUpdated');
+    res.json({ message: `Successfully auto-assigned ${assignedCount} reports using Smart Workload Distribution.`, assignedCount });
+  } catch (err) { next(err); }
+});
+
 // ─── Admin Management Endpoints ────────────────────────────────────────
 
 // Admin scans Technician QR Code to update report status
@@ -709,6 +735,17 @@ app.post('/api/reports/:id/scan', authenticateToken, requireRole('Admin'), async
     params.push(id);
 
     await db.query(query, params);
+
+    if (newStatus === 'Resolved') {
+      // Return all equipment associated with this report
+      await db.query(`
+        UPDATE equipment e
+        JOIN report_equipment re ON e.id = re.equipment_id
+        SET e.status = 'Available', re.returned_at = NOW()
+        WHERE re.report_id = ? AND re.returned_at IS NULL
+      `, [id]);
+    }
+
     const [updated] = await db.query('SELECT * FROM reports WHERE id = ?', [id]);
     io.emit('reportUpdated', updated[0]);
     
@@ -803,6 +840,62 @@ app.get('/api/locations', authenticateToken, requireRole('Admin'), async (req, r
   } catch (err) { next(err); }
 });
 
+// ─── Equipment Management Endpoints ─────────────────────────────────────
+
+app.get('/api/equipment', authenticateToken, async (req, res, next) => {
+  try {
+    const [rows] = await db.query('SELECT * FROM equipment ORDER BY name');
+    res.json(rows);
+  } catch (err) { next(err); }
+});
+
+app.post('/api/equipment', authenticateToken, requireRole('Admin'), async (req, res, next) => {
+  try {
+    const { name, description, qrToken } = req.body;
+    if (!name || !qrToken) return res.status(400).json({ error: 'Name and QR Token required.' });
+    await db.query('INSERT INTO equipment (name, description, qr_token) VALUES (?, ?, ?)', [name, description, qrToken]);
+    res.status(201).json({ message: 'Equipment added.' });
+  } catch (err) { next(err); }
+});
+
+app.delete('/api/equipment/:id', authenticateToken, requireRole('Admin'), async (req, res, next) => {
+  try {
+    await db.query('DELETE FROM equipment WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Equipment deleted.' });
+  } catch (err) { next(err); }
+});
+
+app.get('/api/reports/:id/equipment', authenticateToken, async (req, res, next) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT e.*, re.borrowed_at, re.returned_at 
+      FROM equipment e
+      JOIN report_equipment re ON e.id = re.equipment_id
+      WHERE re.report_id = ?
+    `, [req.params.id]);
+    res.json(rows);
+  } catch (err) { next(err); }
+});
+
+// Scan equipment to a report
+app.post('/api/reports/:id/equipment/scan', authenticateToken, requireRole('Admin'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { qrToken } = req.body;
+    if (!qrToken) return res.status(400).json({ error: 'Equipment QR Token required.' });
+
+    const [equip] = await db.query('SELECT id, name, status FROM equipment WHERE qr_token = ?', [qrToken]);
+    if (equip.length === 0) return res.status(404).json({ error: 'Equipment not found.' });
+    const item = equip[0];
+
+    // Mark as borrowed and link to report
+    await db.query('INSERT INTO report_equipment (report_id, equipment_id) VALUES (?, ?)', [id, item.id]);
+    await db.query('UPDATE equipment SET status = "Borrowed" WHERE id = ?', [item.id]);
+
+    res.json({ message: `Added ${item.name} to report.`, item });
+  } catch (err) { next(err); }
+});
+
 // Recurring Issues Detection (Admin Only)
 app.get('/api/analytics/recurring', authenticateToken, requireRole('Admin'), async (req, res, next) => {
   try {
@@ -841,9 +934,6 @@ app.get('/api/public/status', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// Error handling middleware (must be last)
-app.use(errorHandler);
-
 // Serve Frontend Static Files (from the dist folder)
 const frontendPath = path.join(__dirname, '../frontend/dist');
 app.use(express.static(frontendPath));
@@ -856,6 +946,9 @@ app.use((req, res, next) => {
     next();
   }
 });
+
+// Error handling middleware (must be last)
+app.use(errorHandler);
 
 const os = require('os');
 const getNetworkIP = () => {

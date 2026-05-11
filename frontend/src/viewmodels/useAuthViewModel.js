@@ -15,6 +15,14 @@ export const useAuthViewModel = () => {
     return valid;
   });
 
+  // Re-read the role from localStorage whenever auth state changes so it is
+  // always fresh after login (avoids a stale empty-string on first render).
+  const [userRole, setUserRole] = useState(() => getRole());
+
+  useEffect(() => {
+    setUserRole(getRole());
+  }, [isAuthenticated]);
+
   const login = async (username, password) => {
     const data = await authService.login(username, password);
     if (data.success) {
@@ -40,6 +48,6 @@ export const useAuthViewModel = () => {
     setIsAuthenticated,
     login,
     logout,
-    userRole: getRole(),
+    userRole,
   };
 };

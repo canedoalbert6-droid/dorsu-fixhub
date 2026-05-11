@@ -175,6 +175,20 @@ function App() {
       }
     });
 
+    socket.on('workOrderSubmitted', (data) => {
+      if (getRole() === 'Admin') {
+        const techName = data.report?.assigned_name || 'A technician';
+        const issue = data.report?.issue || 'an issue';
+        const location = data.report?.location_id || '';
+        notificationSound.play().catch(() => {});
+        addNotification(
+          'Work Order Submitted',
+          `${techName} submitted a work order for "${issue}"${location ? ` at ${location}` : ''}`,
+          'report'
+        );
+      }
+    });
+
     return () => socket.disconnect();
   }, [isAuthenticated, addNotification]);
 

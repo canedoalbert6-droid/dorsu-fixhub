@@ -97,6 +97,13 @@ export const unassignReport = async (reportId) => {
   return res.data;
 };
 
+export const autoAssignReports = async () => {
+  const res = await axios.post(`${API_URL}/reports/auto-assign`, {}, {
+    headers: getAuthHeader()
+  });
+  return res.data;
+};
+
 export const scanTechnicianQR = async (reportId, qrToken) => {
   const res = await axios.post(`${API_URL}/reports/${reportId}/scan`, { qrToken }, {
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }
@@ -182,6 +189,33 @@ export const createLocation = async (locData) => {
 
 export const deleteLocation = async (locId) => {
   const res = await axios.delete(`${API_URL}/locations/${locId}`, { headers: getAuthHeader() });
+  return res.data;
+};
+
+// ─── Equipment Management ──────────────────────────────────────────────────────
+
+export const fetchEquipment = async () => {
+  const res = await axios.get(`${API_URL}/equipment`, { headers: getAuthHeader() });
+  return res.data;
+};
+
+export const createEquipment = async (equipData) => {
+  const res = await axios.post(`${API_URL}/equipment`, equipData, { headers: getAuthHeader() });
+  return res.data;
+};
+
+export const deleteEquipment = async (id) => {
+  const res = await axios.delete(`${API_URL}/equipment/${id}`, { headers: getAuthHeader() });
+  return res.data;
+};
+
+export const fetchReportEquipment = async (reportId) => {
+  const res = await axios.get(`${API_URL}/reports/${reportId}/equipment`, { headers: getAuthHeader() });
+  return res.data;
+};
+
+export const scanEquipmentToReport = async (reportId, qrToken) => {
+  const res = await axios.post(`${API_URL}/reports/${reportId}/equipment/scan`, { qrToken }, { headers: getAuthHeader() });
   return res.data;
 };
 
